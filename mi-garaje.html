@@ -1,0 +1,1614 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+<meta name="apple-mobile-web-app-title" content="Mi Garaje"/>
+<meta name="theme-color" content="#f4f6fb"/>
+<title>Mi Garaje</title>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  body{margin:0;padding:0;background:#f4f6fb;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
+  input,select,button{font-family:inherit;}
+  input[type="number"]::-webkit-inner-spin-button{opacity:1;}
+  ::-webkit-scrollbar{width:4px;height:4px;}
+  ::-webkit-scrollbar-thumb{background:#c8d0e8;border-radius:4px;}
+  @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+  .fade-in{animation:fadeIn 0.2s ease-out;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+// ════════════════════════════════════════════
+// UTILIDADES
+// ════════════════════════════════════════════
+const fmt = {
+  date: s => { if (!s) return "—"; const [y,m,d]=s.split("-"); return `${d}/${m}/${y}`; },
+  year: s => { if (!s) return "—"; return s.split("-")[0]; },
+  eur:  n => { if (n==null||n==="") return "—"; return `${parseFloat(n).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g,".")} €`; },
+  km:   n => { if (!n) return "—"; return `${parseInt(n).toLocaleString("es-ES")} km`; },
+};
+
+const TODAY = new Date(); TODAY.setHours(0,0,0,0);
+const daysDiff = s => { if(!s) return null; const d=new Date(s); d.setHours(0,0,0,0); return Math.round((d-TODAY)/86400000); };
+const kmDiff   = (cur,tgt) => (!cur||!tgt) ? null : parseInt(tgt)-parseInt(cur);
+
+const sColor = d => d===null?"#3a4560":d<0?"#e74c3c":d<=30?"#e67e22":d<=90?"#f0a500":"#27ae60";
+const kColor = d => d===null?"#3a4560":d<0?"#e74c3c":d<=500?"#e67e22":d<=2000?"#f0a500":"#27ae60";
+const sLabel = d => d===null?"Sin fecha":d<0?`Vencido hace ${Math.abs(d)}d`:d===0?"HOY":d<=30?`${d}d ⚠️`:d<=90?`${d}d`:`${d}d ✓`;
+const kLabel = d => d===null?"—":d<0?`Pasada ${Math.abs(d).toLocaleString("es-ES")}km`:d<=500?`${d.toLocaleString("es-ES")}km ⚠️`:`${d.toLocaleString("es-ES")}km`;
+
+// ════════════════════════════════════════════
+// COLORES
+// ════════════════════════════════════════════
+const C = {
+  bg:"#f4f6fb", panel:"#ffffff", card:"#ffffff", card2:"#eef1f8",
+  border:"#d8dff0", gold:"#d4860a", goldDim:"#d4860a18",
+  blue:"#1a56cc", blueDim:"#1a56cc12", text:"#111827",
+  dim:"#6b7db3", dim2:"#c8d0e8", ok:"#16a34a", warn:"#d97706",
+  danger:"#dc2626", input:"#f0f3fa", purple:"#7c3aed",
+  teal:"#0891b2", pink:"#db2777", green:"#059669",
+};
+
+// ════════════════════════════════════════════
+// STORAGE
+// ════════════════════════════════════════════
+const SKEY = "garaje_v3";
+
+const initVehicle = (name="") => ({
+  id: Date.now().toString()+Math.random(),
+  name, plate:"", brand:"", model:"", year:"", vehicleType:"Turismo",
+  color:"", fuel:"", power:"", currentKm:"", vin:"", regDate:"",
+  tyreType:"", tyreSummer:"", tyreWinter:"", notes:"",
+  itv:{ expiry:"", notifyDays:"30", result:"", price:"", station:"", stationAddress:"" },
+  insurance:{ company:"", type:"Todo riesgo", expiry:"", notifyDays:"30", price:"", policyNum:"", phone:"", promotions:"", notes:"", appName:"", appUrl:"", appUser:"", appPass:"" },
+  itvHistory:[], insuranceHistory:[], revisions:[], breakdowns:[], claims:[],
+});
+
+const ESPACE_FICHA = {
+  matricula:"9703 JZY", vin:"VF1RFC00857975771", homologacion:"e003634755",
+  certificadoNum:"385005", tipoVariante:"RFC / JD2 / A46A00007000",
+  normativaHomologacion:"e2*2007/46*0470*05", fechaPrimeraMatricula:"2017-06-16",
+  fechaMatriculaActual:"2018-12-03", fechaEmisionFicha:"2017-05-19",
+  fabricante:"Renault, S.A.S.", fabricanteDireccion:"13-15, Quai Alphonse Le Gallo / 92100 Boulogne-Billancourt",
+  firmante:"Renault España Comercial, S.A.", marca:"RENAULT", denominacion:"ESPACE",
+  titularApellidos:"HUELVES MIGUEL", titularNombre:"OSCAR", domicilio:"Toledo",
+  codigoTitular:"C", servicio:"Particular — sin especificar",
+  combustible:"GASOIL — M/D", marcaMotor:"RENAULT", codigoMotor:"R9M E4",
+  cilindrada:"1.598 cm³", cilindros:"4 / en línea", potencia:"96/0 kW",
+  relacionPotPeso:"11,64 kW/kg", cvFiscales:"66", velocidadMax:"116 km/h",
+  co2:"116 g/km", normaEmisiones:"EURO 6W", nivelSonoro:"74 dB", regimenesNivelSonoro:"3.000 rpm",
+  masaVacio:"1.735 kg", masaMaxTec:"2.353 kg", masaMaxEjeDesglose:"1.190 / 1.190 / 0 / 0 kg",
+  f15:"0", masaMaxCarga:"2.353 kg", masaMaxEjeDesglose2:"1.190 / 1.190 / 0 / 0 kg",
+  masaMaxConjunto:"4.353 kg", remolqueO1:"0 kg", remolqueO11:"0 kg", remolqueO12:"0 kg",
+  remolqueConFreno:"2.000 kg", remolqueSinFreno:"750 kg",
+  altura:"1.675 mm", anchura:"1.888 mm", longitud:"4.857 mm",
+  viaDelantera:"1.614 mm", viaTrasera:"1.605 / 0 / 0 mm", distanciaEjes:"2.884 / 0 / 0 mm",
+  m4:"0 / 0", numEjes:"2 ejes / 4 ruedas", traccion:"1 / Delantero / Delantero", l2:"4 - (1)",
+  categoria:"M1", carroceria:"AB (Monovolumen)", j2:"—", j3:"0", colorCarroceria:"GR",
+  clasVehiculo:"1000", d6:"EEE", z:"0 / 0", plazas:"7", plazasPie:"0",
+  neumatico1:"235/65 R17 (104)V  ·  7,00 J17 ET37", neumatico2:"235/60 R18 (103)V  ·  7,50 J18 ET39",
+  neumatico3:"235/55 R19 (101)W  ·  8,00 J19 ET42", neumatico4:"255/45 R20 (105)V  ·  8,50 J20 ET47",
+  neumatico5:"255/45 R20 (105)W  ·  8,50 J20 ET47", viasNeumaticos:"1.634 / 1.625 mm",
+  observaciones:"El vehículo deberá pasar la primera inspección periódica a los dos años de su matriculación",
+};
+
+const loadData = () => {
+  try { const r=localStorage.getItem(SKEY); if(r) return JSON.parse(r); } catch {}
+  const v1 = initVehicle("Renault Espace");
+  v1.plate="9703 JZY"; v1.brand="Renault"; v1.model="Espace"; v1.year="2017";
+  v1.vehicleType="Monovolumen"; v1.fuel="Diésel"; v1.vin="VF1RFC00857975771";
+  v1.regDate="2017-06-16"; v1.ficha=ESPACE_FICHA;
+  v1.itv={ expiry:"2027-06-21", notifyDays:"30", result:"Favorable", price:"", station:"", stationAddress:"" };
+  const v2 = initVehicle("Coche 2");
+  return { vehicles:[v1,v2] };
+};
+const saveData = d => { try { localStorage.setItem(SKEY,JSON.stringify(d)); } catch {} };
+
+// ════════════════════════════════════════════
+// IMAGEN
+// ════════════════════════════════════════════
+function compressImage(file, maxW=800, quality=0.55) {
+  return new Promise((resolve,reject) => {
+    const reader=new FileReader();
+    reader.onerror=reject;
+    reader.onload=e=>{
+      const img=new Image();
+      img.onerror=reject;
+      img.onload=()=>{
+        const ratio=Math.min(1,maxW/img.width);
+        const canvas=document.createElement("canvas");
+        canvas.width=Math.round(img.width*ratio);
+        canvas.height=Math.round(img.height*ratio);
+        canvas.getContext("2d").drawImage(img,0,0,canvas.width,canvas.height);
+        resolve(canvas.toDataURL("image/jpeg",quality));
+      };
+      img.src=e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function getStorageKB() {
+  try { const r=localStorage.getItem(SKEY)||""; return Math.round((r.length*2)/1024); } catch { return 0; }
+}
+
+// ════════════════════════════════════════════
+// MANTENIMIENTO
+// ════════════════════════════════════════════
+const ESPACE_COMPONENTS = [
+  {id:"oil",name:"Aceite motor + filtro aceite",emoji:"🛢️",intervalKm:30000,intervalMonths:24,category:"Motor",notes:"SAE 5W-30 C4 (Renault RN0720)"},
+  {id:"cabin",name:"Filtro habitáculo / antipolen",emoji:"💨",intervalKm:30000,intervalMonths:24,category:"Habitáculo",notes:""},
+  {id:"airfilter",name:"Filtro de aire motor",emoji:"🌬️",intervalKm:60000,intervalMonths:48,category:"Motor",notes:""},
+  {id:"brakefluid",name:"Líquido de frenos",emoji:"🔴",intervalKm:null,intervalMonths:24,category:"Frenos",notes:"DOT 4"},
+  {id:"belt",name:"Correa de distribución + rodillo",emoji:"⚙️",intervalKm:120000,intervalMonths:72,category:"Motor",notes:"Revisión crítica — no superar"},
+  {id:"sparkplugs",name:"Bujías de precalentamiento",emoji:"⚡",intervalKm:120000,intervalMonths:null,category:"Motor",notes:"Solo diésel"},
+  {id:"brakesF",name:"Pastillas de freno delanteras",emoji:"🔵",intervalKm:60000,intervalMonths:null,category:"Frenos",notes:"Revisar espesor en cada ITV"},
+  {id:"brakesR",name:"Pastillas de freno traseras",emoji:"🔵",intervalKm:80000,intervalMonths:null,category:"Frenos",notes:""},
+  {id:"battery",name:"Batería",emoji:"🔋",intervalKm:null,intervalMonths:60,category:"Eléctrico",notes:"Revisar en frío"},
+  {id:"tyres",name:"Neumáticos",emoji:"⭕",intervalKm:40000,intervalMonths:null,category:"Ruedas",notes:"Mín. 1,6 mm profundidad — rec. 3 mm"},
+  {id:"coolant",name:"Líquido refrigerante",emoji:"🌡️",intervalKm:null,intervalMonths:48,category:"Motor",notes:"Coolant tipo D o G13"},
+  {id:"ac",name:"Gas aire acondicionado",emoji:"❄️",intervalKm:null,intervalMonths:36,category:"Habitáculo",notes:""},
+  {id:"wipers",name:"Escobillas limpiaparabrisas",emoji:"🌧️",intervalKm:null,intervalMonths:12,category:"Visibilidad",notes:""},
+];
+
+function calcNext(comp, currentKm) {
+  const lastKm=parseInt(comp.lastKm)||null;
+  const lastDate=comp.lastDate||null;
+  const intKm=comp.intervalKm||null;
+  const intMon=comp.intervalMonths||null;
+  let nextKm=null, nextDate=null;
+  if(lastKm&&intKm) nextKm=lastKm+intKm;
+  if(lastDate&&intMon){const d=new Date(lastDate);d.setMonth(d.getMonth()+intMon);nextDate=d.toISOString().slice(0,10);}
+  const kmLeft=(nextKm&&currentKm)?nextKm-parseInt(currentKm):null;
+  const dayLeft=nextDate?daysDiff(nextDate):null;
+  const urgencyKm=kmLeft!==null?(kmLeft<0?-9999:kmLeft):999999;
+  const urgencyDay=dayLeft!==null?(dayLeft<0?-9999:dayLeft*50):999999;
+  return {nextKm,nextDate,kmLeft,dayLeft,urgent:Math.min(urgencyKm,urgencyDay)};
+}
+
+function calcTotals(vehicle) {
+  const bds=vehicle.breakdowns||[], cls=vehicle.claims||[], fls=vehicle.fuelLogs||[];
+  const seguro=parseFloat(vehicle.insurance?.price||0);
+  const itv=parseFloat(vehicle.itv?.price||0)+(vehicle.itvHistory||[]).reduce((s,r)=>s+(parseFloat(r.price)||0),0);
+  const ivtm=(vehicle.ivtmHistory||[]).reduce((s,r)=>s+(parseFloat(r.price)||0),0)+parseFloat(vehicle.ivtm?.price||0);
+  const averias=bds.reduce((s,b)=>{const bt=(b.bills||[]).reduce((t,bi)=>t+(parseFloat(bi.amount)||0),0);return s+(parseFloat(b.price)||bt||0);},0);
+  const revisiones=(vehicle.maintenanceComponents||[]).reduce((s,c)=>s+(c.history||[]).reduce((t,h)=>t+(parseFloat(h.price)||0),0),0);
+  const partes=cls.reduce((s,c)=>{const bt=(c.bills||[]).reduce((t,b)=>t+(parseFloat(b.amount)||0),0);return s+(parseFloat(c.price)||bt||0);},0);
+  const combustible=fls.reduce((s,f)=>s+(parseFloat(f.total)||0),0);
+  return {seguro,itv,ivtm,averias,revisiones,partes,combustible,total:seguro+itv+ivtm+averias+revisiones+partes+combustible};
+}
+
+// ════════════════════════════════════════════
+// MICRO-COMPONENTES
+// ════════════════════════════════════════════
+const Dot = ({c,s=9})=><span style={{width:s,height:s,borderRadius:"50%",background:c,display:"inline-block",boxShadow:`0 0 7px ${c}`,flexShrink:0}}/>;
+const Pill = ({c,children})=><span style={{display:"inline-flex",alignItems:"center",padding:"2px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:c+"22",color:c,border:`1px solid ${c}44`}}>{children}</span>;
+const Div = ({m="10px 0"})=><div style={{height:1,background:C.border,margin:m}}/>;
+
+const ghostBtn = col=>({background:"none",border:`1px solid ${col}44`,color:col,borderRadius:8,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:4});
+const primaryBtn = (col,textCol="#fff")=>({background:col,color:textCol,border:"none",borderRadius:10,padding:"10px 16px",fontWeight:700,fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6});
+const heroCard = col=>({background:`linear-gradient(135deg,${col}12 0%,${C.card} 100%)`,borderRadius:16,padding:16,border:`1px solid ${col}33`,boxShadow:`0 2px 12px ${col}12`});
+
+const InfoChip = ({label,val,col=C.dim})=>(
+  <div>
+    <div style={{fontSize:9,color:C.dim,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:2}}>{label}</div>
+    <div style={{fontSize:13,fontWeight:700,color:col}}>{val}</div>
+  </div>
+);
+
+const SectionBlock = ({title,accent,children})=>(
+  <div style={{background:C.card,borderRadius:14,padding:16,border:`1px solid ${C.border}`,marginBottom:12}}>
+    <div style={{fontSize:12,fontWeight:800,color:accent,marginBottom:12,textTransform:"uppercase",letterSpacing:"0.07em"}}>{title}</div>
+    {children}
+  </div>
+);
+
+const SectionLayout = ({title,emoji,col,onBack,children})=>(
+  <div style={{minHeight:"100vh",background:C.bg,paddingBottom:32}}>
+    <div style={{background:`linear-gradient(160deg,${col}15 0%,${C.panel} 100%)`,padding:"16px 20px",borderBottom:`1px solid ${col}22`,position:"sticky",top:0,zIndex:50,backdropFilter:"blur(8px)"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <Back onClick={onBack}/>
+        <div style={{fontSize:16,fontWeight:800,color:C.text}}>{emoji} {title}</div>
+      </div>
+    </div>
+    <div style={{padding:"14px 16px 0"}}>{children}</div>
+  </div>
+);
+
+const Field = ({label,type="text",value,onChange,placeholder,pw})=>(
+  <div style={{marginBottom:13}}>
+    <label style={{fontSize:10,color:C.dim,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.08em",display:"block",marginBottom:5}}>{label}</label>
+    <input type={pw?"password":type} value={value||""} onChange={e=>onChange(e.target.value)} placeholder={placeholder||""}
+      style={{width:"100%",background:C.input,border:`1px solid ${C.border}`,borderRadius:9,padding:"9px 13px",color:C.text,fontSize:13,outline:"none",boxSizing:"border-box"}}
+      step={type==="number"?"0.01":undefined}/>
+  </div>
+);
+
+const Sel = ({label,value,onChange,opts})=>(
+  <div style={{marginBottom:13}}>
+    <label style={{fontSize:10,color:C.dim,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.08em",display:"block",marginBottom:5}}>{label}</label>
+    <select value={value||""} onChange={e=>onChange(e.target.value)}
+      style={{width:"100%",background:C.input,border:`1px solid ${C.border}`,borderRadius:9,padding:"9px 13px",color:C.text,fontSize:13,outline:"none"}}>
+      {opts.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
+    </select>
+  </div>
+);
+
+const Back = ({onClick,label=""})=>(
+  <button onClick={onClick} style={{display:"flex",alignItems:"center",gap:6,background:"none",border:"none",color:C.dim,cursor:"pointer",padding:0,fontSize:13,fontWeight:600}}>
+    <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+    {label}
+  </button>
+);
+
+const MapBtn = ({addr,label})=>{
+  if(!addr) return null;
+  return <a href={`https://maps.google.com/?q=${encodeURIComponent(addr)}`} target="_blank" rel="noopener noreferrer"
+    style={{display:"inline-flex",alignItems:"center",gap:5,fontSize:11,color:C.teal,fontWeight:700,textDecoration:"none",padding:"4px 11px",borderRadius:8,border:`1px solid ${C.teal}44`,background:C.teal+"11"}}>
+    📍 {label||addr}
+  </a>;
+};
+
+const TotalCard = ({label,total,col})=>total>0?(
+  <div style={{background:C.card,borderRadius:12,padding:"10px 14px",marginBottom:12,border:`1px solid ${col}33`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+    <span style={{fontSize:11,color:C.dim,fontWeight:600}}>{label}</span>
+    <span style={{fontSize:18,fontWeight:900,color:col}}>{fmt.eur(total)}</span>
+  </div>
+):null;
+
+const HistoryTable = ({rows,cols,onDelete})=>{
+  if(!rows||rows.length===0) return <div style={{textAlign:"center",padding:"20px",color:C.dim,fontSize:12}}>Sin registros históricos</div>;
+  return (
+    <div style={{overflowX:"auto"}}>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+        <thead>
+          <tr>{cols.map(c=><th key={c.k} style={{padding:"6px 8px",textAlign:"left",color:C.dim,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.06em",borderBottom:`1px solid ${C.border}`,whiteSpace:"nowrap"}}>{c.l}</th>)}<th style={{width:28}}/></tr>
+        </thead>
+        <tbody>
+          {rows.map((r,i)=>(
+            <tr key={i} style={{borderBottom:`1px solid ${C.border}22`}}>
+              {cols.map(c=>(
+                <td key={c.k} style={{padding:"8px 8px",color:c.color?c.color(r[c.k]):C.text,fontWeight:c.bold?700:400,whiteSpace:c.wrap?"normal":"nowrap",maxWidth:c.maxW||"none"}}>
+                  {c.fmt?c.fmt(r[c.k]):(r[c.k]||"—")}
+                </td>
+              ))}
+              <td><button onClick={()=>onDelete(i)} style={{background:"none",border:"none",color:C.danger,cursor:"pointer",padding:2,opacity:0.6}}>✕</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+// ════════════════════════════════════════════
+// FOTO Y ADJUNTO
+// ════════════════════════════════════════════
+function PhotoUploader({value,onChange,label="Foto",maxW=800,quality=0.55,size=100}){
+  const [loading,setLoading]=useState(false);
+  const [warn,setWarn]=useState(false);
+  const inputRef=useRef();
+  const handle=async(e)=>{
+    const file=e.target.files?.[0]; if(!file) return;
+    setLoading(true); setWarn(false);
+    try{const b64=await compressImage(file,maxW,quality);const kb=Math.round(b64.length*0.75/1024);if(kb>300)setWarn(true);onChange(b64);}catch(err){console.error(err);}
+    setLoading(false);
+  };
+  return(
+    <div style={{marginBottom:14}}>
+      <label style={{fontSize:10,color:C.dim,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.08em",display:"block",marginBottom:6}}>{label}</label>
+      <div style={{display:"flex",alignItems:"center",gap:12}}>
+        <div onClick={()=>inputRef.current?.click()} style={{width:size,height:size*0.6,borderRadius:10,overflow:"hidden",background:C.card2,border:`1px dashed ${value?C.gold:C.border}`,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,position:"relative"}}>
+          {value?<img src={value} alt="foto" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span style={{fontSize:24,opacity:0.4}}>📷</span>}
+          {loading&&<div style={{position:"absolute",inset:0,background:"#000a",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:"#fff"}}>...</div>}
+        </div>
+        <div>
+          <button type="button" onClick={()=>inputRef.current?.click()} style={{...ghostBtn(C.gold),marginBottom:6,display:"block"}}>{value?"Cambiar foto":"Subir foto"}</button>
+          {value&&<button type="button" onClick={()=>onChange("")} style={ghostBtn(C.danger)}>Quitar</button>}
+          {warn&&<div style={{fontSize:10,color:C.warn,marginTop:4}}>⚠️ Imagen grande.</div>}
+        </div>
+      </div>
+      <input ref={inputRef} type="file" accept="image/*" style={{display:"none"}} onChange={handle}/>
+    </div>
+  );
+}
+
+function AttachButton({value,onChange}){
+  const [loading,setLoading]=useState(false);
+  const inputRef=useRef();
+  const handle=async(e)=>{
+    const file=e.target.files?.[0]; if(!file) return;
+    setLoading(true);
+    const isPDF=file.type==="application/pdf";
+    const kb=Math.round(file.size/1024);
+    if(isPDF){onChange({type:"pdf",name:file.name,size:kb,data:null,driveOnly:kb>200});}
+    else{const b64=await compressImage(file,1400,0.7);const bKb=Math.round(b64.length*0.75/1024);onChange({type:"img",name:file.name,size:bKb,data:bKb<300?b64:null,driveOnly:bKb>=300});}
+    setLoading(false);
+  };
+  if(value) return(
+    <div style={{display:"flex",alignItems:"center",gap:8,background:C.bg,borderRadius:8,padding:"6px 10px",border:`1px solid ${C.border}`}}>
+      <span style={{fontSize:14}}>{value.type==="pdf"?"📄":"🖼️"}</span>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:11,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{value.name}</div>
+        {value.driveOnly?<div style={{fontSize:9,color:C.warn}}>☁️ Grande · guarda en Drive</div>:<div style={{fontSize:9,color:C.ok}}>✓ Guardado ({value.size} KB)</div>}
+      </div>
+      {value.data&&value.type==="img"&&<img src={value.data} alt="" style={{width:36,height:28,objectFit:"cover",borderRadius:5,border:`1px solid ${C.border}`}}/>}
+      <button onClick={()=>onChange(null)} style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:14,padding:0}}>✕</button>
+    </div>
+  );
+  return(
+    <>
+      <button type="button" onClick={()=>inputRef.current?.click()} style={{...ghostBtn(C.dim),fontSize:10,padding:"4px 10px"}}>{loading?"...":"📎 Adjuntar foto/PDF"}</button>
+      <input ref={inputRef} type="file" accept="image/*,application/pdf" style={{display:"none"}} onChange={handle}/>
+    </>
+  );
+}
+
+function StorageMeter(){
+  const kb=getStorageKB(); const max=4800; const pct=Math.min(100,Math.round((kb/max)*100));
+  const col=pct>80?C.danger:pct>55?C.warn:C.ok;
+  return(
+    <div style={{margin:"12px 16px 0",background:C.card,borderRadius:12,padding:"10px 14px",border:`1px solid ${C.border}`}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+        <span style={{fontSize:10,color:C.dim,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em"}}>💾 Memoria app</span>
+        <span style={{fontSize:10,color:col,fontWeight:700}}>{kb} KB / {Math.round(max/1024)} MB ({pct}%)</span>
+      </div>
+      <div style={{height:4,background:C.dim2,borderRadius:4}}><div style={{height:4,background:col,borderRadius:4,width:`${pct}%`,transition:"width 0.4s"}}/></div>
+      {pct>70&&<div style={{fontSize:9,color:C.warn,marginTop:5}}>⚠️ Espacio limitado. Exporta a Drive.</div>}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════
+// CAR SVG
+// ════════════════════════════════════════════
+const CarSVG = ({w=80,h=40,col="#f0a500",dim=false})=>(
+  <svg width={w} height={h} viewBox="0 0 120 56" fill="none">
+    <ellipse cx="60" cy="52" rx="54" ry="3" fill={col} opacity="0.1"/>
+    <rect x="4" y="32" width="112" height="16" rx="5" fill={col} opacity={dim?0.15:0.6}/>
+    <path d="M28 32 C32 16 44 10 60 10 C76 10 88 16 92 32Z" fill={col} opacity={dim?0.2:0.85}/>
+    <path d="M38 31 C40 20 50 14 60 14 C70 14 80 20 82 31Z" fill={C.bg} opacity="0.35"/>
+    <circle cx="28" cy="46" r="10" fill={C.bg} stroke={col} strokeWidth="2.5" opacity={dim?0.4:1}/>
+    <circle cx="28" cy="46" r="5" fill={col} opacity={dim?0.3:0.7}/><circle cx="28" cy="46" r="2" fill={C.bg}/>
+    <circle cx="92" cy="46" r="10" fill={C.bg} stroke={col} strokeWidth="2.5" opacity={dim?0.4:1}/>
+    <circle cx="92" cy="46" r="5" fill={col} opacity={dim?0.3:0.7}/><circle cx="92" cy="46" r="2" fill={C.bg}/>
+    <rect x="5" y="33" width="10" height="6" rx="2" fill={dim?"#333":"#e74c3c"} opacity="0.8"/>
+    <rect x="105" y="33" width="10" height="6" rx="2" fill={dim?"#333":"#f0d060"} opacity="0.9"/>
+  </svg>
+);
+
+// ════════════════════════════════════════════
+// GASTOS RESUMEN
+// ════════════════════════════════════════════
+function GastosResumen({vehicle}){
+  const t=calcTotals(vehicle); if(t.total===0) return null;
+  const items=[
+    {label:"Seguro",val:t.seguro,col:C.purple},{label:"ITV",val:t.itv,col:C.blue},
+    {label:"IVTM",val:t.ivtm,col:"#c0392b"},{label:"Revisiones",val:t.revisiones,col:C.teal},
+    {label:"Averías",val:t.averias,col:C.danger},{label:"Partes",val:t.partes,col:C.pink},
+    {label:"Combustible",val:t.combustible,col:"#16a085"},
+  ].filter(i=>i.val>0);
+  return(
+    <div style={{margin:"0 16px 16px",background:C.card,borderRadius:14,padding:14,border:`1px solid ${C.border}`}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <div style={{fontSize:11,fontWeight:700,color:C.dim,textTransform:"uppercase",letterSpacing:"0.07em"}}>💰 Gasto total acumulado</div>
+        <div style={{fontSize:22,fontWeight:900,color:C.gold}}>{fmt.eur(t.total)}</div>
+      </div>
+      {items.map(item=>(
+        <div key={item.label} style={{marginBottom:7}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+            <span style={{fontSize:11,color:C.dim}}>{item.label}</span>
+            <span style={{fontSize:11,fontWeight:700,color:item.col}}>{fmt.eur(item.val)}</span>
+          </div>
+          <div style={{height:3,background:C.dim2,borderRadius:3}}>
+            <div style={{height:3,background:item.col,borderRadius:3,width:`${Math.min(100,(item.val/t.total)*100)}%`,transition:"width 0.5s"}}/>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════
+// HOME SCREEN
+// ════════════════════════════════════════════
+function HomeScreen({data,onSelectVehicle,onExport}){
+  return(
+    <div style={{minHeight:"100vh",background:C.bg}}>
+      <div style={{background:`linear-gradient(160deg,${C.blue}12 0%,${C.panel} 100%)`,padding:"28px 20px 20px",borderBottom:`1px solid ${C.border}`}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+          <div>
+            <div style={{fontSize:11,color:C.dim,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:6}}>🔑 Panel de control</div>
+            <div style={{fontSize:26,fontWeight:900,color:C.text,lineHeight:1}}>Mi Garaje</div>
+          </div>
+          <button onClick={onExport} style={{background:C.goldDim,border:`1px solid ${C.gold}44`,color:C.gold,borderRadius:12,padding:"8px 15px",fontSize:12,fontWeight:700,cursor:"pointer"}}>☁️ Drive</button>
+        </div>
+      </div>
+      <div style={{padding:"20px 16px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+        {data.vehicles.slice(0,2).map((v,i)=>{
+          const itvD=daysDiff(v.itv?.expiry);
+          const segD=daysDiff(v.insurance?.expiry);
+          const revs=v.maintenanceComponents||[];
+          const nextRevKm=revs.length?Math.min(...revs.map(c=>{const {kmLeft}=calcNext(c,v.currentKm);return kmLeft??999999;}).filter(d=>d<999999).concat([999999])):null;
+          const worstD=[itvD,segD].filter(d=>d!==null);
+          const colMain=worstD.length?sColor(Math.min(...worstD)):C.blue;
+          return(
+            <div key={v.id} onClick={()=>onSelectVehicle(i)}
+              style={{background:`linear-gradient(160deg,${colMain}12 0%,${C.card} 100%)`,borderRadius:20,border:`1px solid ${colMain}33`,padding:"18px 14px 16px",cursor:"pointer",boxShadow:`0 4px 16px ${colMain}18`,position:"relative",overflow:"hidden"}}>
+              <div style={{position:"absolute",top:10,right:12,fontSize:28,fontWeight:900,color:colMain,opacity:0.12,lineHeight:1}}>{i+1}</div>
+              <div style={{marginBottom:12,display:"flex",justifyContent:"center",height:70,alignItems:"center",overflow:"hidden",borderRadius:10}}>
+                {v.photo?<img src={v.photo} alt={v.name} style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:10}}/>:<CarSVG w={130} h={60} col={colMain}/>}
+              </div>
+              <div style={{fontSize:15,fontWeight:800,color:C.text,marginBottom:2,textAlign:"center"}}>{v.name||`Coche ${i+1}`}</div>
+              <div style={{fontSize:11,color:C.dim,textAlign:"center",marginBottom:12}}>{v.plate||"Sin matrícula"}{v.brand?` · ${v.brand}`:""}</div>
+              <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                {[["ITV",sColor(itvD),sLabel(itvD)],["Seguro",sColor(segD),sLabel(segD)]].map(([k,c,l])=>(
+                  <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.bg+"88",borderRadius:8,padding:"5px 8px"}}>
+                    <span style={{fontSize:10,color:C.dim}}>{k}</span>
+                    <div style={{display:"flex",alignItems:"center",gap:4}}><Dot c={c} s={7}/><span style={{fontSize:10,color:c,fontWeight:700}}>{l}</span></div>
+                  </div>
+                ))}
+                {nextRevKm!==null&&nextRevKm<999999&&(
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.bg+"88",borderRadius:8,padding:"5px 8px"}}>
+                    <span style={{fontSize:10,color:C.dim}}>Revisión</span>
+                    <div style={{display:"flex",alignItems:"center",gap:4}}><Dot c={kColor(nextRevKm)} s={7}/><span style={{fontSize:10,color:kColor(nextRevKm),fontWeight:700}}>{kLabel(nextRevKm)}</span></div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{margin:"0 16px",background:C.card,borderRadius:14,padding:"12px 16px",border:`1px solid ${C.border}`}}>
+        <div style={{fontSize:10,color:C.dim,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>Leyenda</div>
+        <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+          {[[C.ok,"OK (>90d / >2000km)"],[C.gold,"Próximo"],[C.warn,"Urgente"],[C.danger,"Vencido"]].map(([c,l])=>(
+            <div key={l} style={{display:"flex",alignItems:"center",gap:5}}><Dot c={c} s={8}/><span style={{fontSize:10,color:C.dim}}>{l}</span></div>
+          ))}
+        </div>
+      </div>
+      <StorageMeter/>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════
+// VEHICLE SCREEN
+// ════════════════════════════════════════════
+const SECTIONS=[
+  {id:"ficha",emoji:"📄",label:"Ficha",col:"#64748b"},
+  {id:"itv",emoji:"🔧",label:"ITV",col:C.blue},
+  {id:"insurance",emoji:"🛡️",label:"Seguro",col:C.purple},
+  {id:"ivtm",emoji:"🏛️",label:"IVTM",col:"#c0392b"},
+  {id:"revisions",emoji:"⚙️",label:"Revisiones",col:C.teal},
+  {id:"breakdowns",emoji:"🔩",label:"Averías",col:C.warn},
+  {id:"claims",emoji:"📋",label:"Partes",col:C.pink},
+  {id:"fuel",emoji:"⛽",label:"Combustible",col:"#16a085"},
+];
+
+function VehicleScreen({vehicle,onBack,onSection,onUpdate,onEdit}){
+  const itvD=daysDiff(vehicle.itv?.expiry);
+  const segD=daysDiff(vehicle.insurance?.expiry);
+  const worstD=[itvD,segD].filter(d=>d!==null);
+  const colMain=worstD.length?sColor(Math.min(...worstD)):C.blue;
+  return(
+    <div style={{minHeight:"100vh",background:C.bg}}>
+      <div style={{background:`linear-gradient(160deg,${colMain}15 0%,${C.panel} 100%)`,padding:"18px 20px 0",borderBottom:`1px solid ${C.border}33`}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+          <Back onClick={onBack} label="Garaje"/>
+          <div style={{flex:1}}/>
+          <button onClick={onEdit} style={{background:C.goldDim,border:`1px solid ${C.gold}33`,color:C.gold,borderRadius:9,padding:"5px 13px",fontSize:11,fontWeight:700,cursor:"pointer"}}>✏️ Editar</button>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:16}}>
+          <div style={{width:110,height:55,borderRadius:12,overflow:"hidden",flexShrink:0,background:C.card2,border:`1px solid ${colMain}33`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            {vehicle.photo?<img src={vehicle.photo} alt={vehicle.name} style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<CarSVG w={110} h={50} col={colMain}/>}
+          </div>
+          <div>
+            <div style={{fontSize:22,fontWeight:900,color:C.text,lineHeight:1.1,marginBottom:4}}>{vehicle.name||"Vehículo"}</div>
+            <div style={{fontSize:12,color:C.dim}}>{vehicle.brand} {vehicle.model} {vehicle.year}</div>
+            <div style={{fontSize:12,color:C.gold,fontWeight:700}}>{vehicle.plate}</div>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,paddingBottom:16}}>
+          {[["Km",vehicle.currentKm?`${parseInt(vehicle.currentKm).toLocaleString("es-ES")}`:"—"],["Fuel",vehicle.fuel||"—"],["Ruedas",vehicle.tyreSummer||vehicle.tyreType||"—"],["Color",vehicle.color||"—"]].map(([k,v])=>(
+            <div key={k} style={{background:C.bg+"99",borderRadius:10,padding:"8px 8px",textAlign:"center",border:`1px solid ${C.border}33`}}>
+              <div style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:3}}>{k}</div>
+              <div style={{fontSize:11,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{v}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{padding:"16px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+        {SECTIONS.map(sec=>{
+          let statusD=null,badge=null;
+          if(sec.id==="itv"){statusD=itvD;badge=itvD!==null?sLabel(itvD):null;}
+          if(sec.id==="insurance"){statusD=segD;badge=segD!==null?sLabel(segD):null;}
+          if(sec.id==="revisions"){const comps=vehicle.maintenanceComponents||[];const urgent=comps.filter(c=>{const{kmLeft,dayLeft}=calcNext(c,vehicle.currentKm);return(kmLeft!==null&&kmLeft<2000)||(dayLeft!==null&&dayLeft<60);}).length;badge=urgent>0?`${urgent} urgente${urgent>1?"s":""}`:comps.length>0?`${comps.length} elementos`:null;statusD=urgent>0?15:null;}
+          if(sec.id==="breakdowns"){const b=vehicle.breakdowns||[];badge=`${b.length} reg.`;}
+          if(sec.id==="ficha"){badge=vehicle.ficha?.marca?`${vehicle.ficha.marca}`.trim():null;}
+          if(sec.id==="claims"){const cl=vehicle.claims||[];const open=cl.filter(c=>c.status==="Abierto").length;badge=open>0?`${open} abierto${open>1?"s":""}`:cl.length>0?`${cl.length} cerrado${cl.length>1?"s":""}`:null;statusD=open>0?15:null;}
+          if(sec.id==="ivtm"){const nextD=daysDiff(vehicle.ivtm?.nextExpiry);statusD=nextD;badge=nextD!==null?sLabel(nextD):(vehicle.ivtmHistory||[]).length>0?`${(vehicle.ivtmHistory||[]).length} pagos`:null;}
+          if(sec.id==="fuel"){const fl=vehicle.fuelLogs||[];const tot=fl.reduce((s,f)=>s+(parseFloat(f.total)||0),0);badge=fl.length>0?`${fl.length} repos · ${fmt.eur(tot)}`:null;}
+          const col=statusD!==null?sColor(statusD):sec.col;
+          return(
+            <div key={sec.id} onClick={()=>onSection(sec.id)}
+              style={{background:`linear-gradient(135deg,${col}18 0%,${C.card} 100%)`,borderRadius:16,border:`1px solid ${col}44`,padding:"14px 12px",cursor:"pointer",boxShadow:`0 4px 20px ${col}12`,minHeight:95,display:"flex",flexDirection:"column",justifyContent:"space-between"}}>
+              <div style={{fontSize:24,marginBottom:4}}>{sec.emoji}</div>
+              <div>
+                <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:3}}>{sec.label}</div>
+                {badge&&<div style={{display:"inline-flex",alignItems:"center",padding:"1px 7px",borderRadius:20,fontSize:9,fontWeight:700,background:col+"22",color:col,border:`1px solid ${col}44`}}>{badge}</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <GastosResumen vehicle={vehicle}/>
+      <div style={{position:"fixed",bottom:24,right:16,zIndex:100}}>
+        <button onClick={()=>onSection("scan")} style={{background:`linear-gradient(135deg,${C.gold},#e67e00)`,color:C.bg,border:"none",borderRadius:"50%",width:58,height:58,fontSize:24,cursor:"pointer",boxShadow:`0 6px 24px ${C.gold}66`,display:"flex",alignItems:"center",justifyContent:"center"}}>📸</button>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════
+// SECCIÓN DOCUMENTOS
+// ════════════════════════════════════════════
+function SectionDocs({vehicle,sectionKey,onUpdate,accent,docTypes}){
+  const key=`${sectionKey}Docs`;
+  const docs=vehicle[key]||[];
+  const [adding,setAdding]=useState(false);
+  const blank={id:"",type:docTypes[0]||"Documento",name:"",notes:"",attach:null};
+  const [form,setForm]=useState(blank);
+  const add=()=>{if(!form.type)return;const newDoc={...form,id:Date.now().toString()};onUpdate({...vehicle,[key]:[newDoc,...docs]});setForm(blank);setAdding(false);};
+  const del=id=>onUpdate({...vehicle,[key]:docs.filter(d=>d.id!==id)});
+  return(
+    <SectionBlock title={`📎 Documentos (${docs.length})`} accent={accent}>
+      {docs.map(d=>(
+        <div key={d.id} style={{display:"flex",gap:10,alignItems:"flex-start",padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
+          <span style={{fontSize:18,flexShrink:0}}>{d.attach?.type==="pdf"?"📄":d.attach?.data?"🖼️":"📎"}</span>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:12,fontWeight:700}}>{d.type}</div>
+            {d.name&&<div style={{fontSize:11,color:C.dim}}>{d.name}</div>}
+            {d.notes&&<div style={{fontSize:10,color:C.dim,marginTop:2}}>{d.notes}</div>}
+            {d.attach&&<div style={{fontSize:9,color:d.attach.driveOnly?C.warn:C.ok,marginTop:4}}>{d.attach.driveOnly?`☁️ ${d.attach.name} · subir a Drive`:`✓ ${d.attach.name} (${d.attach.size}KB)`}</div>}
+          </div>
+          <button onClick={()=>del(d.id)} style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:13,flexShrink:0}}>✕</button>
+        </div>
+      ))}
+      {adding?(
+        <div style={{background:C.bg,borderRadius:10,padding:12,marginTop:8,border:`1px dashed ${C.border}`}}>
+          <Sel label="Tipo de documento" value={form.type} onChange={v=>setForm(p=>({...p,type:v}))} opts={docTypes.map(t=>({v:t,l:t}))}/>
+          <Field label="Nombre / referencia" value={form.name} onChange={v=>setForm(p=>({...p,name:v}))} placeholder="Ej: Póliza 2025"/>
+          <Field label="Notas" value={form.notes} onChange={v=>setForm(p=>({...p,notes:v}))} placeholder="Observaciones..."/>
+          <div style={{marginBottom:12}}>
+            <label style={{fontSize:10,color:C.dim,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.08em",display:"block",marginBottom:6}}>Archivo</label>
+            <AttachButton value={form.attach} onChange={v=>setForm(p=>({...p,attach:v}))}/>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>setAdding(false)} style={ghostBtn(C.dim)}>Cancelar</button>
+            <button onClick={add} style={{...primaryBtn(accent),flex:1}}>Guardar doc</button>
+          </div>
+        </div>
+      ):(
+        <button onClick={()=>setAdding(true)} style={{...ghostBtn(accent),marginTop:10,fontSize:11}}>+ Añadir documento</button>
+      )}
+    </SectionBlock>
+  );
+}
+
+// ════════════════════════════════════════════
+// FICHA TÉCNICA
+// ════════════════════════════════════════════
+const FICHA_COL="#64748b";
+function FichaView({vehicle,onBack}){
+  const f=vehicle.ficha||{};
+  const Block=({title,rows})=>{
+    const filled=rows.filter(r=>r[1]); if(!filled.length) return null;
+    return(
+      <div style={{marginBottom:12}}>
+        <div style={{fontSize:10,fontWeight:700,color:C.gold,textTransform:"uppercase",letterSpacing:"0.09em",marginBottom:6,paddingLeft:8,borderLeft:`3px solid ${C.gold}`}}>{title}</div>
+        <div style={{background:C.card,borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden"}}>
+          {filled.map(([k,v],i)=>(
+            <div key={k} style={{display:"flex",borderBottom:i<filled.length-1?`1px solid ${C.border}33`:"none"}}>
+              <div style={{width:"44%",padding:"8px 12px",fontSize:11,color:C.dim,fontWeight:600,flexShrink:0}}>{k}</div>
+              <div style={{flex:1,padding:"8px 12px",fontSize:12,color:C.text,wordBreak:"break-word"}}>{v}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+  const empty=!f.marca&&!f.vin&&!f.matricula;
+  return(
+    <SectionLayout title="Ficha técnica" emoji="📄" col={FICHA_COL} onBack={onBack}>
+      <div style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:8}}>
+        <span style={{fontSize:16}}>🔒</span>
+        <span style={{fontSize:11,color:C.dim}}>Solo lectura. Para modificar usa <strong style={{color:C.gold}}>✏️ Editar</strong>.</span>
+      </div>
+      {empty?<div style={{textAlign:"center",padding:"50px 20px",color:C.dim}}><div style={{fontSize:40,marginBottom:10}}>📄</div><div>Sin ficha técnica. Añádela desde ✏️ Editar.</div></div>:(
+        <>
+          <div style={{background:`linear-gradient(135deg,${FICHA_COL}20,${C.card})`,border:`1px solid ${FICHA_COL}44`,borderRadius:14,padding:16,marginBottom:14,display:"flex",alignItems:"center",gap:16}}>
+            <div style={{fontSize:44}}>🚙</div>
+            <div>
+              <div style={{fontSize:20,fontWeight:900,color:C.text}}>{f.marca} {f.denominacion}</div>
+              {f.matricula&&<div style={{display:"inline-block",background:C.gold,color:C.bg,fontWeight:900,fontSize:16,padding:"3px 14px",borderRadius:6,marginTop:6,letterSpacing:2}}>{f.matricula}</div>}
+            </div>
+          </div>
+          <Block title="🪪 Identificación" rows={[["Matrícula",f.matricula],["VIN — E",f.vin],["Homologación — B",f.homologacion],["Certificado",f.certificadoNum],["Tipo/Variante — D.2",f.tipoVariante],["Normativa — K",f.normativaHomologacion],["1ª Matriculación",f.fechaPrimeraMatricula?.split("-").reverse().join("/")],["Matriculación actual",f.fechaMatriculaActual?.split("-").reverse().join("/")]]}/>
+          <Block title="🏭 Fabricante" rows={[["Fabricante — A.1",f.fabricante],["Dirección — A.2",f.fabricanteDireccion],["Marca — D.1",f.marca],["Denominación — D.3",f.denominacion]]}/>
+          <Block title="👤 Titular" rows={[["Apellidos — C.1.1",f.titularApellidos],["Nombre — C.1.2",f.titularNombre],["Domicilio — C.1.3",f.domicilio],["Servicio — D.4",f.servicio]]}/>
+          <Block title="🔧 Motor" rows={[["Combustible — P.3",f.combustible],["Código motor — P.5",f.codigoMotor],["Cilindrada — P.1",f.cilindrada],["Cilindros — P.1.1",f.cilindros],["Potencia — P.2",f.potencia],["CV fiscales",f.cvFiscales],["Velocidad máx.",f.velocidadMax],["CO₂ — V.7",f.co2],["Norma emisiones — V.9",f.normaEmisiones],["Nivel sonoro — U.1",f.nivelSonoro]]}/>
+          <Block title="⚖️ Masas" rows={[["Masa vacío — G",f.masaVacio],["Masa máx. — F.1",f.masaMaxTec],["Masa máx. carga — F.2",f.masaMaxCarga],["Masa conjunto — F.3",f.masaMaxConjunto],["Rem. con freno — O.1.3",f.remolqueConFreno],["Rem. sin freno — O.1.4",f.remolqueSinFreno]]}/>
+          <Block title="📐 Dimensiones" rows={[["Longitud — F.6",f.longitud],["Anchura — F.5",f.anchura],["Altura — F.4",f.altura],["Batalla — M.1",f.distanciaEjes],["Vía delantera — F.7",f.viaDelantera],["Vía trasera — F.7.1",f.viaTrasera]]}/>
+          <Block title="🚗 Carrocería" rows={[["Categoría — J",f.categoria],["Carrocería — J.1",f.carroceria],["Plazas — S.1",f.plazas],["Tracción — L.1",f.traccion]]}/>
+          <Block title="🛞 Neumáticos" rows={[["Opción 1",f.neumatico1],["Opción 2",f.neumatico2],["Opción 3",f.neumatico3],["Opción 4",f.neumatico4],["Opción 5",f.neumatico5],["Vías",f.viasNeumaticos]]}/>
+          <Block title="📝 Observaciones" rows={[["Observaciones",f.observaciones],["Notas",f.notas]]}/>
+        </>
+      )}
+    </SectionLayout>
+  );
+}
+
+// ════════════════════════════════════════════
+// ITV
+// ════════════════════════════════════════════
+function ITVView({vehicle,onBack,onUpdate}){
+  const itv=vehicle.itv||{};
+  const history=vehicle.itvHistory||[];
+  const itvD=daysDiff(itv.expiry);
+  const col=sColor(itvD);
+  const [adding,setAdding]=useState(false);
+  const [form,setForm]=useState({expiry:"",result:"",price:"",station:"",stationAddress:"",notes:""});
+  const itvTotal=parseFloat(itv.price||0)+history.reduce((s,r)=>s+(parseFloat(r.price)||0),0);
+  const archiveCurrent=()=>{if(!itv.expiry&&!itv.result)return;onUpdate({...vehicle,itvHistory:[{...itv,archivedAt:new Date().toISOString().slice(0,10)},...history]});};
+  const addHistory=()=>{onUpdate({...vehicle,itvHistory:[{...form,archivedAt:form.expiry||new Date().toISOString().slice(0,10)},...history]});setForm({expiry:"",result:"",price:"",station:"",stationAddress:"",notes:""});setAdding(false);};
+  const delHistory=i=>{const h=[...history];h.splice(i,1);onUpdate({...vehicle,itvHistory:h});};
+  return(
+    <SectionLayout title="ITV" emoji="🔧" col={C.blue} onBack={onBack}>
+      <TotalCard label="Total gastado en ITV" total={itvTotal} col={C.blue}/>
+      <div style={{...heroCard(col),marginBottom:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+          <div>
+            <div style={{fontSize:11,color:col,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:4}}>Próxima ITV</div>
+            <div style={{fontSize:28,fontWeight:900,color:C.text}}>{itv.expiry?fmt.date(itv.expiry):"Sin fecha"}</div>
+            <div style={{fontSize:13,color:col,fontWeight:700,marginTop:2}}>{itvD!==null?`${sLabel(itvD)} (${Math.abs(itvD)} días)`:""}</div>
+          </div>
+          <Dot c={col} s={18}/>
+        </div>
+        <Div m="12px 0 10px"/>
+        <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+          <InfoChip label="Resultado" val={itv.result||"—"} col={itv.result==="Favorable"?C.ok:itv.result?.includes("leves")?C.warn:itv.result==="Desfavorable"?C.danger:C.dim}/>
+          <InfoChip label="Precio" val={fmt.eur(itv.price)}/>
+          {itv.notifyDays&&<InfoChip label="Aviso" val={`${itv.notifyDays}d antes`}/>}
+        </div>
+        {(itv.station||itv.stationAddress)&&<div style={{marginTop:10}}><MapBtn addr={itv.stationAddress||itv.station} label={itv.station||"Ver estación ITV"}/></div>}
+      </div>
+      <SectionBlock title="📅 Historial de ITVs" accent={C.blue}>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:10}}>
+          <button onClick={archiveCurrent} style={ghostBtn(C.dim)}>Archivar actual</button>
+          <button onClick={()=>setAdding(!adding)} style={ghostBtn(C.blue)}>+ Añadir</button>
+        </div>
+        {adding&&(
+          <div style={{background:C.bg,borderRadius:12,padding:14,marginBottom:12,border:`1px dashed ${C.border}`}}>
+            <Field label="Fecha ITV" type="date" value={form.expiry} onChange={v=>setForm(p=>({...p,expiry:v}))}/>
+            <Sel label="Resultado" value={form.result} onChange={v=>setForm(p=>({...p,result:v}))} opts={[{v:"",l:"— Sin especificar"},{v:"Favorable",l:"✅ Favorable"},{v:"Favorable con defectos leves",l:"⚠️ Con defectos leves"},{v:"Desfavorable",l:"❌ Desfavorable"},{v:"Negativa",l:"🚫 Negativa"}]}/>
+            <Field label="Precio (€)" type="number" value={form.price} onChange={v=>setForm(p=>({...p,price:v}))} placeholder="0.00"/>
+            <Field label="Estación" value={form.station} onChange={v=>setForm(p=>({...p,station:v}))} placeholder="Nombre estación ITV"/>
+            <Field label="Dirección" value={form.stationAddress} onChange={v=>setForm(p=>({...p,stationAddress:v}))} placeholder="Para abrir en mapa"/>
+            <Field label="Notas" value={form.notes} onChange={v=>setForm(p=>({...p,notes:v}))} placeholder="Observaciones..."/>
+            <div style={{display:"flex",gap:8,marginTop:4}}>
+              <button onClick={()=>setAdding(false)} style={ghostBtn(C.dim)}>Cancelar</button>
+              <button onClick={addHistory} style={primaryBtn(C.blue)}>Guardar</button>
+            </div>
+          </div>
+        )}
+        <HistoryTable rows={history} cols={[{k:"expiry",l:"Fecha",fmt:fmt.date,bold:true},{k:"result",l:"Resultado",color:v=>v==="Favorable"?C.ok:v?.includes("leves")?C.warn:v==="Desfavorable"?C.danger:C.dim},{k:"price",l:"Precio",fmt:fmt.eur},{k:"station",l:"Estación",maxW:"80px",wrap:true}]} onDelete={delHistory}/>
+      </SectionBlock>
+      <SectionDocs vehicle={vehicle} sectionKey="itv" onUpdate={onUpdate} accent={C.blue} docTypes={["Tarjeta ITV","Informe de inspección","Justificante de pago","Cita previa","Otro"]}/>
+    </SectionLayout>
+  );
+}
+
+// ════════════════════════════════════════════
+// SEGURO
+// ════════════════════════════════════════════
+function InsuranceView({vehicle,onBack,onUpdate}){
+  const ins=vehicle.insurance||{};
+  const history=vehicle.insuranceHistory||[];
+  const segD=daysDiff(ins.expiry);
+  const col=sColor(segD);
+  const [adding,setAdding]=useState(false);
+  const [showPass,setShowPass]=useState(false);
+  const blankH={expiry:"",company:"",type:"Todo riesgo",price:"",policyNum:"",promotions:"",notes:""};
+  const [form,setForm]=useState(blankH);
+  const archiveCurrent=()=>{if(!ins.company&&!ins.expiry)return;onUpdate({...vehicle,insuranceHistory:[{company:ins.company,type:ins.type,expiry:ins.expiry,price:ins.price,policyNum:ins.policyNum,promotions:ins.promotions,notes:ins.notes,archivedAt:new Date().toISOString().slice(0,10)},...history]});};
+  const addHistory=()=>{onUpdate({...vehicle,insuranceHistory:[{...form,archivedAt:form.expiry||new Date().toISOString().slice(0,10)},...history]});setForm(blankH);setAdding(false);};
+  const delHistory=i=>{const h=[...history];h.splice(i,1);onUpdate({...vehicle,insuranceHistory:h});};
+  const insTotal=parseFloat(ins.price||0)+history.reduce((s,r)=>s+(parseFloat(r.price)||0),0);
+  return(
+    <SectionLayout title="Seguro" emoji="🛡️" col={C.purple} onBack={onBack}>
+      <TotalCard label="Total pagado en seguros" total={insTotal} col={C.purple}/>
+      <div style={{...heroCard(col),marginBottom:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+          <div>
+            <div style={{fontSize:11,color:col,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:4}}>{ins.type||"Seguro"}</div>
+            <div style={{fontSize:22,fontWeight:900,color:C.text}}>{ins.company||"Sin compañía"}</div>
+            <div style={{fontSize:13,color:col,fontWeight:700,marginTop:2}}>{ins.expiry?`Vence ${fmt.date(ins.expiry)} · ${sLabel(segD)}`:""}</div>
+          </div>
+          <Dot c={col} s={18}/>
+        </div>
+        <Div m="12px 0 10px"/>
+        <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+          <InfoChip label="Prima anual" val={fmt.eur(ins.price)} col={C.gold}/>
+          <InfoChip label="Mensual" val={ins.price?fmt.eur(parseFloat(ins.price)/12):"—"}/>
+          {ins.policyNum&&<InfoChip label="Póliza" val={ins.policyNum}/>}
+        </div>
+        {ins.promotions&&<div style={{marginTop:10,fontSize:12,color:C.ok,fontWeight:600}}>🎁 {ins.promotions}</div>}
+        {ins.notes&&<div style={{marginTop:6,fontSize:12,color:C.dim}}>{ins.notes}</div>}
+        {ins.phone&&<div style={{marginTop:8}}><a href={`tel:${ins.phone}`} style={{fontSize:12,color:C.teal,fontWeight:700,textDecoration:"none"}}>📞 {ins.phone}</a></div>}
+      </div>
+      {(ins.appName||ins.appUrl)&&(
+        <div style={{background:C.card,borderRadius:14,padding:14,marginBottom:12,border:`1px solid ${C.border}`}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.purple,marginBottom:8}}>📱 App de la aseguradora</div>
+          {ins.appName&&<div style={{fontSize:13,marginBottom:6}}><strong>{ins.appName}</strong></div>}
+          {ins.appUser&&<div style={{fontSize:12,color:C.dim,marginBottom:4}}>Usuario: <span style={{color:C.text}}>{ins.appUser}</span></div>}
+          {ins.appPass&&<div style={{fontSize:12,color:C.dim,marginBottom:8,display:"flex",alignItems:"center",gap:8}}>Clave: <span style={{fontFamily:"monospace",background:C.bg,padding:"2px 8px",borderRadius:6,color:C.text}}>{showPass?ins.appPass:"••••••••"}</span><button onClick={()=>setShowPass(p=>!p)} style={{background:"none",border:"none",color:C.gold,cursor:"pointer",fontSize:10,fontWeight:700}}>{showPass?"Ocultar":"Ver"}</button></div>}
+          {ins.appUrl&&<a href={ins.appUrl} target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:12,color:C.purple,fontWeight:700,textDecoration:"none",padding:"6px 14px",borderRadius:9,border:`1px solid ${C.purple}44`,background:C.purple+"11"}}>🌐 Abrir web / app</a>}
+        </div>
+      )}
+      <SectionBlock title="📅 Historial de seguros" accent={C.purple}>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:10}}>
+          <button onClick={archiveCurrent} style={ghostBtn(C.dim)}>Archivar actual</button>
+          <button onClick={()=>setAdding(!adding)} style={ghostBtn(C.purple)}>+ Añadir</button>
+        </div>
+        {adding&&(
+          <div style={{background:C.bg,borderRadius:12,padding:14,marginBottom:12,border:`1px dashed ${C.border}`}}>
+            <Field label="Año / Fecha vencimiento" type="date" value={form.expiry} onChange={v=>setForm(p=>({...p,expiry:v}))}/>
+            <Field label="Compañía" value={form.company} onChange={v=>setForm(p=>({...p,company:v}))} placeholder="Ej: Mapfre"/>
+            <Sel label="Tipo" value={form.type} onChange={v=>setForm(p=>({...p,type:v}))} opts={[{v:"Todo riesgo",l:"Todo riesgo"},{v:"Todo riesgo con franquicia",l:"Todo riesgo con franquicia"},{v:"Terceros ampliado",l:"Terceros ampliado"},{v:"Terceros básico",l:"Terceros básico"}]}/>
+            <Field label="Prima anual (€)" type="number" value={form.price} onChange={v=>setForm(p=>({...p,price:v}))} placeholder="0.00"/>
+            <Field label="Nº póliza" value={form.policyNum} onChange={v=>setForm(p=>({...p,policyNum:v}))} placeholder="Opcional"/>
+            <Field label="Promociones" value={form.promotions} onChange={v=>setForm(p=>({...p,promotions:v}))} placeholder="Ej: 15% renovación"/>
+            <Field label="Notas" value={form.notes} onChange={v=>setForm(p=>({...p,notes:v}))} placeholder="Coberturas, observaciones..."/>
+            <div style={{display:"flex",gap:8,marginTop:4}}>
+              <button onClick={()=>setAdding(false)} style={ghostBtn(C.dim)}>Cancelar</button>
+              <button onClick={addHistory} style={primaryBtn(C.purple)}>Guardar</button>
+            </div>
+          </div>
+        )}
+        <HistoryTable rows={history} cols={[{k:"expiry",l:"Año",fmt:fmt.year,bold:true},{k:"company",l:"Compañía",maxW:"70px",wrap:true},{k:"price",l:"Precio",fmt:fmt.eur,col:()=>C.gold},{k:"promotions",l:"Premio",maxW:"70px",wrap:true,color:()=>C.ok}]} onDelete={delHistory}/>
+      </SectionBlock>
+      <SectionDocs vehicle={vehicle} sectionKey="insurance" onUpdate={onUpdate} accent={C.purple} docTypes={["Póliza del seguro","Certificado del seguro","Recibo / factura","Carta verde","Declaración amistosa","Otro"]}/>
+    </SectionLayout>
+  );
+}
+
+// ════════════════════════════════════════════
+// IVTM
+// ════════════════════════════════════════════
+const IVTM_COL="#c0392b";
+function IVTMView({vehicle,onBack,onUpdate}){
+  const ivtm=vehicle.ivtm||{};
+  const history=vehicle.ivtmHistory||[];
+  const nextD=daysDiff(ivtm.nextExpiry);
+  const col=nextD!==null?sColor(nextD):IVTM_COL;
+  const [adding,setAdding]=useState(false);
+  const blank={year:"",date:"",price:"",municipality:"",reference:"",notes:""};
+  const [form,setForm]=useState(blank);
+  const total=parseFloat(ivtm.price||0)+history.reduce((s,r)=>s+(parseFloat(r.price)||0),0);
+  const archiveCurrent=()=>{if(!ivtm.price&&!ivtm.year)return;onUpdate({...vehicle,ivtmHistory:[{...ivtm,archivedAt:new Date().toISOString().slice(0,10)},...history]});};
+  const addHistory=()=>{onUpdate({...vehicle,ivtmHistory:[{...form,archivedAt:form.date||new Date().toISOString().slice(0,10)},...history]});setForm(blank);setAdding(false);};
+  const delHistory=i=>{const h=[...history];h.splice(i,1);onUpdate({...vehicle,ivtmHistory:h});};
+  return(
+    <SectionLayout title="IVTM" emoji="🏛️" col={IVTM_COL} onBack={onBack}>
+      <TotalCard label="Total pagado en IVTM" total={total} col={IVTM_COL}/>
+      <div style={{...heroCard(col),marginBottom:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+          <div>
+            <div style={{fontSize:11,color:col,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:4}}>Impuesto Vehículos Tracción Mecánica</div>
+            <div style={{fontSize:26,fontWeight:900,color:C.text}}>{ivtm.price?fmt.eur(ivtm.price):"Sin importe"}</div>
+            {ivtm.year&&<div style={{fontSize:13,color:C.dim,marginTop:2}}>Ejercicio {ivtm.year}</div>}
+            {ivtm.nextExpiry&&<div style={{fontSize:13,color:col,fontWeight:700,marginTop:4}}>Próx. vto: {fmt.date(ivtm.nextExpiry)} · {sLabel(nextD)}</div>}
+          </div>
+          <Dot c={col} s={18}/>
+        </div>
+        <Div m="12px 0 10px"/>
+        <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+          {ivtm.municipality&&<InfoChip label="Municipio" val={ivtm.municipality}/>}
+          {ivtm.reference&&<InfoChip label="Referencia" val={ivtm.reference}/>}
+        </div>
+      </div>
+      <div style={{background:C.card,borderRadius:14,padding:14,marginBottom:12,border:`1px solid ${C.border}`}}>
+        <div style={{fontSize:11,fontWeight:700,color:IVTM_COL,marginBottom:12,textTransform:"uppercase",letterSpacing:"0.06em"}}>📝 Datos actuales</div>
+        <Field label="Año del ejercicio" type="number" value={ivtm.year} onChange={v=>onUpdate({...vehicle,ivtm:{...ivtm,year:v}})} placeholder="Ej: 2025"/>
+        <Field label="Fecha de pago" type="date" value={ivtm.date} onChange={v=>onUpdate({...vehicle,ivtm:{...ivtm,date:v}})}/>
+        <Field label="Importe (€)" type="number" value={ivtm.price} onChange={v=>onUpdate({...vehicle,ivtm:{...ivtm,price:v}})} placeholder="0.00"/>
+        <Field label="Municipio recaudador" value={ivtm.municipality} onChange={v=>onUpdate({...vehicle,ivtm:{...ivtm,municipality:v}})} placeholder="Ej: Parla"/>
+        <Field label="Nº referencia / recibo" value={ivtm.reference} onChange={v=>onUpdate({...vehicle,ivtm:{...ivtm,reference:v}})} placeholder="Ej: 2025-IVT-12345"/>
+        <Field label="Próx. vencimiento" type="date" value={ivtm.nextExpiry} onChange={v=>onUpdate({...vehicle,ivtm:{...ivtm,nextExpiry:v}})}/>
+        <Field label="Aviso (días antes)" type="number" value={ivtm.notifyDays} onChange={v=>onUpdate({...vehicle,ivtm:{...ivtm,notifyDays:v}})} placeholder="30"/>
+        <Field label="Notas" value={ivtm.notes} onChange={v=>onUpdate({...vehicle,ivtm:{...ivtm,notes:v}})} placeholder="Domiciliación, observaciones..."/>
+      </div>
+      <SectionBlock title="📅 Historial de pagos IVTM" accent={IVTM_COL}>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:10}}>
+          <button onClick={archiveCurrent} style={ghostBtn(C.dim)}>Archivar actual</button>
+          <button onClick={()=>setAdding(!adding)} style={ghostBtn(IVTM_COL)}>+ Añadir</button>
+        </div>
+        {adding&&(
+          <div style={{background:C.bg,borderRadius:12,padding:14,marginBottom:12,border:`1px dashed ${C.border}`}}>
+            <Field label="Año" type="number" value={form.year} onChange={v=>setForm(p=>({...p,year:v}))} placeholder="Ej: 2024"/>
+            <Field label="Fecha de pago" type="date" value={form.date} onChange={v=>setForm(p=>({...p,date:v}))}/>
+            <Field label="Importe (€)" type="number" value={form.price} onChange={v=>setForm(p=>({...p,price:v}))} placeholder="0.00"/>
+            <Field label="Municipio" value={form.municipality} onChange={v=>setForm(p=>({...p,municipality:v}))} placeholder="Ej: Parla"/>
+            <Field label="Nº referencia" value={form.reference} onChange={v=>setForm(p=>({...p,reference:v}))} placeholder="Opcional"/>
+            <Field label="Notas" value={form.notes} onChange={v=>setForm(p=>({...p,notes:v}))} placeholder="Observaciones..."/>
+            <div style={{display:"flex",gap:8,marginTop:4}}>
+              <button onClick={()=>setAdding(false)} style={ghostBtn(C.dim)}>Cancelar</button>
+              <button onClick={addHistory} style={primaryBtn(IVTM_COL)}>Guardar</button>
+            </div>
+          </div>
+        )}
+        <HistoryTable rows={history} cols={[{k:"year",l:"Año",bold:true},{k:"date",l:"Fecha",fmt:fmt.date},{k:"price",l:"Importe",fmt:fmt.eur,col:()=>C.gold},{k:"municipality",l:"Municipio",maxW:"70px",wrap:true}]} onDelete={delHistory}/>
+      </SectionBlock>
+      <SectionDocs vehicle={vehicle} sectionKey="ivtm" onUpdate={onUpdate} accent={IVTM_COL} docTypes={["Recibo de pago","Carta de pago","Domiciliación bancaria","Notificación municipal","Otro"]}/>
+    </SectionLayout>
+  );
+}
+
+// ════════════════════════════════════════════
+// REVISIONES
+// ════════════════════════════════════════════
+function RevisionsView({vehicle,onBack,onUpdate}){
+  const currentKm=parseInt(vehicle.currentKm)||null;
+  const components=vehicle.maintenanceComponents||[];
+  const [view,setView]=useState("list");
+  const [selComp,setSelComp]=useState(null);
+
+  useEffect(()=>{
+    if(components.length===0){
+      const init=ESPACE_COMPONENTS.map(c=>({...c,lastKm:"",lastDate:"",lastPrice:"",lastWorkshop:"",history:[]}));
+      onUpdate({...vehicle,maintenanceComponents:init});
+    }
+  },[]);
+
+  const saveComp=comp=>{
+    const list=[...components];
+    const idx=list.findIndex(c=>c.id===comp.id);
+    if(idx>=0)list[idx]=comp;else list.push(comp);
+    onUpdate({...vehicle,maintenanceComponents:list});
+    setView("list");setSelComp(null);
+  };
+  const delComp=id=>{onUpdate({...vehicle,maintenanceComponents:components.filter(c=>c.id!==id)});setView("list");setSelComp(null);};
+  const registerChange=(comp,override={})=>{
+    const entry={date:override.date||new Date().toISOString().slice(0,10),km:override.km||vehicle.currentKm||"",price:override.price||"",workshop:override.workshop||"",notes:override.notes||""};
+    const updated={...comp,lastDate:entry.date,lastKm:entry.km,lastPrice:entry.price,lastWorkshop:entry.workshop,history:[entry,...(comp.history||[])]};
+    saveComp(updated);
+  };
+
+  const totalGasto=components.reduce((s,c)=>s+(c.history||[]).reduce((t,h)=>t+(parseFloat(h.price)||0),0),0);
+  const sorted=[...components].map(c=>({...c,_calc:calcNext(c,currentKm)})).sort((a,b)=>a._calc.urgent-b._calc.urgent);
+
+  if(view==="component"&&selComp) return <ComponentView comp={selComp} currentKm={currentKm} vehicle={vehicle} onSave={saveComp} onDelete={delComp} onBack={()=>{setView("list");setSelComp(null);}} onRegisterChange={registerChange}/>;
+  if(view==="add") return <ComponentEditForm comp={{id:Date.now().toString(),name:"",emoji:"🔧",intervalKm:"",intervalMonths:"",category:"",notes:"",lastKm:"",lastDate:"",lastPrice:"",lastWorkshop:"",history:[]}} onSave={c=>{saveComp(c);setView("list");}} onCancel={()=>setView("list")}/>;
+
+  const categories=[...new Set(sorted.map(c=>c.category||"Otros"))];
+  const nextServiceItems=sorted.filter(c=>{const{kmLeft,dayLeft}=c._calc;return(kmLeft!==null&&kmLeft<=5000)||(dayLeft!==null&&dayLeft<=60);}).slice(0,6);
+  const overdue=sorted.filter(c=>{const{kmLeft,dayLeft}=c._calc;return(kmLeft!==null&&kmLeft<0)||(dayLeft!==null&&dayLeft<0);});
+
+  return(
+    <SectionLayout title="Mantenimiento" emoji="⚙️" col={C.teal} onBack={onBack}>
+      <TotalCard label="Total gastado en mantenimiento" total={totalGasto} col={C.teal}/>
+      {(nextServiceItems.length>0||overdue.length>0)&&(
+        <div style={{background:C.card,borderRadius:16,padding:16,marginBottom:14,border:`1px solid ${C.teal}33`}}>
+          {overdue.length>0&&(
+            <div style={{background:`${C.danger}10`,border:`1px solid ${C.danger}30`,borderRadius:12,padding:"10px 14px",marginBottom:12}}>
+              <div style={{fontSize:12,fontWeight:800,color:C.danger,marginBottom:8}}>🚨 Vencido — cambiar ya</div>
+              {overdue.map(c=>(
+                <div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5,paddingBottom:5,borderBottom:`1px solid ${C.border}`}}>
+                  <span style={{fontSize:13}}>{c.emoji} <strong>{c.name}</strong></span>
+                  <div style={{display:"flex",gap:5}}>
+                    {c._calc.kmLeft!==null&&c._calc.kmLeft<0&&<Pill c={C.danger}>+{Math.abs(c._calc.kmLeft).toLocaleString("es-ES")} km</Pill>}
+                    {c._calc.dayLeft!==null&&c._calc.dayLeft<0&&<Pill c={C.danger}>+{Math.abs(c._calc.dayLeft)}d</Pill>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {nextServiceItems.length>0&&(
+            <>
+              <div style={{fontSize:12,fontWeight:800,color:C.teal,marginBottom:10}}>🔧 Próximos cambios</div>
+              {nextServiceItems.map((c,i)=>{
+                const{kmLeft,dayLeft,nextKm,nextDate}=c._calc;
+                const col2=(kmLeft!==null&&kmLeft<=1000)||(dayLeft!==null&&dayLeft<=14)?C.warn:C.teal;
+                const pct=kmLeft!==null&&currentKm&&c.intervalKm?Math.max(0,Math.min(100,100-(kmLeft/c.intervalKm*100))):dayLeft!==null&&c.intervalMonths?Math.max(0,Math.min(100,100-(dayLeft/(c.intervalMonths*30)*100))):null;
+                return(
+                  <div key={c.id} onClick={()=>{setSelComp(c);setView("component");}} style={{padding:"10px 0",borderBottom:i<nextServiceItems.length-1?`1px solid ${C.border}`:0,cursor:"pointer"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                      <span style={{fontSize:13,fontWeight:700}}>{c.emoji} {c.name}</span>
+                      <div style={{display:"flex",gap:5}}>
+                        {kmLeft!==null&&<Pill c={kColor(kmLeft)}>{kLabel(kmLeft)}</Pill>}
+                        {dayLeft!==null&&<Pill c={sColor(dayLeft)}>{sLabel(dayLeft)}</Pill>}
+                      </div>
+                    </div>
+                    {pct!==null&&<div style={{height:5,background:C.dim2,borderRadius:5,overflow:"hidden"}}><div style={{height:5,background:`linear-gradient(90deg,${C.ok},${col2})`,width:`${pct}%`,borderRadius:5}}/></div>}
+                    <div style={{fontSize:10,color:C.dim,marginTop:4}}>{nextKm&&`Toca a los ${fmt.km(nextKm)}`}{nextKm&&nextDate?" · ":""}{nextDate&&`antes de ${fmt.date(nextDate)}`}</div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+      )}
+      {nextServiceItems.length===0&&overdue.length===0&&components.length>0&&(
+        <div style={{background:`${C.ok}10`,border:`1px solid ${C.ok}33`,borderRadius:14,padding:"14px 16px",marginBottom:14,display:"flex",alignItems:"center",gap:12}}>
+          <span style={{fontSize:28}}>✅</span>
+          <div><div style={{fontSize:13,fontWeight:800,color:C.ok}}>Todo al día</div><div style={{fontSize:11,color:C.dim}}>Ningún elemento en los próximos 60 días / 5.000 km</div></div>
+        </div>
+      )}
+      {categories.map(cat=>(
+        <div key={cat}>
+          <div style={{fontSize:10,fontWeight:700,color:C.dim,textTransform:"uppercase",letterSpacing:"0.08em",margin:"12px 0 6px",paddingLeft:2}}>{cat}</div>
+          {sorted.filter(c=>(c.category||"Otros")===cat).map(c=>{
+            const{kmLeft,dayLeft}=c._calc;
+            const worstCol=kmLeft!==null&&dayLeft!==null?(kmLeft<dayLeft*50?kColor(kmLeft):sColor(dayLeft)):kmLeft!==null?kColor(kmLeft):dayLeft!==null?sColor(dayLeft):C.teal;
+            const neverChanged=!c.lastDate&&!c.lastKm;
+            return(
+              <div key={c.id} onClick={()=>{setSelComp(c);setView("component");}} style={{background:C.card,borderRadius:14,padding:"12px 14px",marginBottom:8,border:`1px solid ${C.border}`,borderLeft:`3px solid ${worstCol}`,cursor:"pointer"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,fontWeight:800,marginBottom:3}}>{c.emoji} {c.name}</div>
+                    {neverChanged?<div style={{fontSize:10,color:C.warn}}>⚠️ Sin registro de último cambio</div>:<div style={{fontSize:10,color:C.dim}}>Último: {fmt.date(c.lastDate)}{c.lastKm?` · ${fmt.km(c.lastKm)}`:""}</div>}
+                  </div>
+                  <Dot c={worstCol} s={10}/>
+                </div>
+                {!neverChanged&&(
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:7}}>
+                    {c._calc.nextKm&&currentKm&&<Pill c={kColor(kmLeft)}>{kLabel(kmLeft)}</Pill>}
+                    {c._calc.nextDate&&<Pill c={sColor(dayLeft)}>{sLabel(dayLeft)}</Pill>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+      <div style={{display:"flex",gap:10,marginTop:8,paddingBottom:80}}>
+        <button onClick={()=>setView("add")} style={{...primaryBtn(C.teal),flex:1}}>+ Añadir elemento</button>
+      </div>
+      <SectionDocs vehicle={vehicle} sectionKey="revisions" onUpdate={onUpdate} accent={C.teal} docTypes={["Factura de revisión","Presupuesto","Albarán taller","Garantía de piezas","Otro"]}/>
+    </SectionLayout>
+  );
+}
+
+function ComponentView({comp,currentKm,vehicle,onSave,onDelete,onBack,onRegisterChange}){
+  const{kmLeft,dayLeft,nextKm,nextDate}=calcNext(comp,currentKm);
+  const[editing,setEditing]=useState(false);
+  const[registering,setRegistering]=useState(false);
+  const[changeForm,setChangeForm]=useState({date:new Date().toISOString().slice(0,10),km:vehicle.currentKm||"",price:"",workshop:"",notes:""});
+  const worstCol=kmLeft!==null&&dayLeft!==null?(kmLeft<dayLeft*50?kColor(kmLeft):sColor(dayLeft)):kmLeft!==null?kColor(kmLeft):dayLeft!==null?sColor(dayLeft):C.teal;
+  if(editing) return <ComponentEditForm comp={comp} onSave={c=>{onSave(c);}} onCancel={()=>setEditing(false)}/>;
+  return(
+    <SectionLayout title={comp.name} emoji={comp.emoji||"⚙️"} col={worstCol} onBack={onBack}>
+      <div style={{...heroCard(worstCol),marginBottom:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+          <div><div style={{fontSize:32,marginBottom:4}}>{comp.emoji}</div><div style={{fontSize:17,fontWeight:900,color:C.text}}>{comp.name}</div>{comp.category&&<div style={{fontSize:11,color:C.dim,marginTop:2}}>{comp.category}</div>}</div>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={()=>setEditing(true)} style={ghostBtn(C.teal)}>✏️</button>
+            <button onClick={()=>{if(confirm("¿Eliminar este elemento?"))onDelete(comp.id);}} style={ghostBtn(C.danger)}>🗑️</button>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+          {nextKm&&currentKm&&<Pill c={kColor(kmLeft)}>{kmLeft>=0?"Faltan":"Superado hace"} {Math.abs(kmLeft).toLocaleString("es-ES")} km → {fmt.km(nextKm)}</Pill>}
+          {nextDate&&<Pill c={sColor(dayLeft)}>{dayLeft>=0?"Faltan":"Hace"} {Math.abs(dayLeft)}d → {fmt.date(nextDate)}</Pill>}
+          {!nextKm&&!nextDate&&!comp.lastDate&&!comp.lastKm&&<Pill c={C.warn}>⚠️ Sin datos de último cambio</Pill>}
+        </div>
+        <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
+          {comp.intervalKm&&<InfoChip label="Cada" val={`${parseInt(comp.intervalKm).toLocaleString("es-ES")} km`} col={C.teal}/>}
+          {comp.intervalMonths&&<InfoChip label="Cada" val={`${comp.intervalMonths} meses`} col={C.teal}/>}
+        </div>
+        {comp.notes&&<div style={{marginTop:8,fontSize:11,color:C.dim,fontStyle:"italic"}}>ℹ️ {comp.notes}</div>}
+      </div>
+      {(comp.lastDate||comp.lastKm)&&(
+        <div style={{background:C.card,borderRadius:12,padding:"12px 14px",marginBottom:12,border:`1px solid ${C.border}`}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.dim,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:8}}>🔙 Último cambio</div>
+          <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+            {comp.lastDate&&<InfoChip label="Fecha" val={fmt.date(comp.lastDate)}/>}
+            {comp.lastKm&&<InfoChip label="Km" val={fmt.km(comp.lastKm)}/>}
+            {comp.lastPrice&&<InfoChip label="Precio" val={fmt.eur(comp.lastPrice)} col={C.gold}/>}
+            {comp.lastWorkshop&&<InfoChip label="Taller" val={comp.lastWorkshop}/>}
+          </div>
+        </div>
+      )}
+      {!registering&&<button onClick={()=>setRegistering(true)} style={{...primaryBtn(`linear-gradient(135deg,${C.ok},#1e8449)`),width:"100%",marginBottom:12,fontSize:15}}>✅ Registrar cambio ahora</button>}
+      {registering&&(
+        <div style={{background:"#27ae6018",border:`1px solid ${C.ok}44`,borderRadius:14,padding:14,marginBottom:12}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.ok,marginBottom:12}}>✅ Registrar cambio de {comp.name}</div>
+          <Field label="Fecha del cambio" type="date" value={changeForm.date} onChange={v=>setChangeForm(p=>({...p,date:v}))}/>
+          <Field label="Km en el cambio" type="number" value={changeForm.km} onChange={v=>setChangeForm(p=>({...p,km:v}))} placeholder={vehicle.currentKm||""}/>
+          <Field label="Precio (€)" type="number" value={changeForm.price} onChange={v=>setChangeForm(p=>({...p,price:v}))} placeholder="0.00"/>
+          <Field label="Taller" value={changeForm.workshop} onChange={v=>setChangeForm(p=>({...p,workshop:v}))} placeholder="Ej: Taller Pepe"/>
+          <Field label="Notas" value={changeForm.notes} onChange={v=>setChangeForm(p=>({...p,notes:v}))} placeholder="Marca, referencia..."/>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>setRegistering(false)} style={{...ghostBtn(C.dim),flex:1,justifyContent:"center"}}>Cancelar</button>
+            <button onClick={()=>{onRegisterChange(comp,changeForm);setRegistering(false);}} style={{...primaryBtn(C.ok),flex:2}}>💾 Guardar cambio</button>
+          </div>
+        </div>
+      )}
+      {(comp.history||[]).length>0&&(
+        <SectionBlock title={`📅 Historial de cambios (${comp.history.length})`} accent={C.teal}>
+          <HistoryTable rows={comp.history} cols={[{k:"date",l:"Fecha",fmt:fmt.date,bold:true},{k:"km",l:"Km",fmt:v=>v?fmt.km(v):"—"},{k:"price",l:"€",fmt:fmt.eur,col:()=>C.gold},{k:"workshop",l:"Taller",maxW:"70px",wrap:true}]}
+            onDelete={i=>{const h=[...(comp.history||[])];h.splice(i,1);const updated={...comp,history:h};if(h.length>0){updated.lastDate=h[0].date;updated.lastKm=h[0].km;updated.lastPrice=h[0].price;updated.lastWorkshop=h[0].workshop;}else{updated.lastDate="";updated.lastKm="";updated.lastPrice="";updated.lastWorkshop="";}onSave(updated);}}/>
+        </SectionBlock>
+      )}
+    </SectionLayout>
+  );
+}
+
+function ComponentEditForm({comp,onSave,onCancel}){
+  const[c,setC]=useState(comp);
+  const u=(k,v)=>setC(p=>({...p,[k]:v}));
+  return(
+    <SectionLayout title={c.name||"Nuevo elemento"} emoji={c.emoji||"⚙️"} col={C.teal} onBack={onCancel}>
+      <div style={{background:C.card,borderRadius:14,padding:16,border:`1px solid ${C.border}`}}>
+        <Field label="Nombre del elemento" value={c.name} onChange={v=>u("name",v)} placeholder="Ej: Aceite motor + filtro"/>
+        <Field label="Emoji / icono" value={c.emoji} onChange={v=>u("emoji",v)} placeholder="🛢️"/>
+        <Field label="Categoría" value={c.category} onChange={v=>u("category",v)} placeholder="Ej: Motor, Frenos, Eléctrico..."/>
+        <Div m="14px 0"/>
+        <div style={{fontSize:10,color:C.teal,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:10}}>🔄 Intervalo de cambio</div>
+        <Field label="Cada X km" type="number" value={c.intervalKm} onChange={v=>u("intervalKm",v)} placeholder="Ej: 30000"/>
+        <Field label="Cada X meses" type="number" value={c.intervalMonths} onChange={v=>u("intervalMonths",v)} placeholder="Ej: 24"/>
+        <Div m="14px 0"/>
+        <div style={{fontSize:10,color:C.dim,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:10}}>🔙 Último cambio conocido</div>
+        <Field label="Fecha del último cambio" type="date" value={c.lastDate} onChange={v=>u("lastDate",v)}/>
+        <Field label="Km en el último cambio" type="number" value={c.lastKm} onChange={v=>u("lastKm",v)} placeholder="Ej: 45000"/>
+        <Field label="Precio del último cambio (€)" type="number" value={c.lastPrice} onChange={v=>u("lastPrice",v)} placeholder="0.00"/>
+        <Field label="Taller del último cambio" value={c.lastWorkshop} onChange={v=>u("lastWorkshop",v)} placeholder=""/>
+        <Div m="14px 0"/>
+        <Field label="Notas / especificaciones técnicas" value={c.notes} onChange={v=>u("notes",v)} placeholder="Tipo de aceite, referencia..."/>
+        <div style={{display:"flex",gap:8,marginTop:8}}>
+          <button onClick={onCancel} style={{...ghostBtn(C.dim),flex:1,justifyContent:"center"}}>Cancelar</button>
+          <button onClick={()=>onSave(c)} style={{...primaryBtn(C.teal),flex:2}}>💾 Guardar</button>
+        </div>
+      </div>
+    </SectionLayout>
+  );
+}
+
+// ════════════════════════════════════════════
+// AVERÍAS
+// ════════════════════════════════════════════
+function BreakdownsView({vehicle,onBack,onUpdate}){
+  const bds=vehicle.breakdowns||[];
+  const[adding,setAdding]=useState(false);
+  const[expanded,setExpanded]=useState(null);
+  const[billForm,setBillForm]=useState({concept:"",date:"",amount:"",attach:null});
+  const blank={description:"",workshop:"",workshopAddress:"",date:"",price:"",notes:"",bills:[],id:""};
+  const[form,setForm]=useState(blank);
+  const totalGasto=bds.reduce((s,b)=>{const bTotal=(b.bills||[]).reduce((t,bi)=>t+(parseFloat(bi.amount)||0),0);return s+(parseFloat(b.price)||bTotal||0);},0);
+  const add=()=>{onUpdate({...vehicle,breakdowns:[{...form,id:Date.now().toString()},...bds]});setForm(blank);setAdding(false);};
+  const del=id=>onUpdate({...vehicle,breakdowns:bds.filter(b=>b.id!==id)});
+  const addBill=idx=>{if(!billForm.amount)return;const list=[...bds];list[idx]={...list[idx],bills:[...(list[idx].bills||[]),{...billForm}]};onUpdate({...vehicle,breakdowns:list});setBillForm({concept:"",date:"",amount:"",attach:null});};
+  const delBill=(bIdx,biIdx)=>{const list=[...bds];list[bIdx]={...list[bIdx],bills:list[bIdx].bills.filter((_,i)=>i!==biIdx)};onUpdate({...vehicle,breakdowns:list});};
+  return(
+    <SectionLayout title="Averías" emoji="🔩" col={C.warn} onBack={onBack}>
+      {bds.length>0&&<div style={{background:C.card,borderRadius:14,padding:"12px 16px",marginBottom:12,border:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:12,color:C.dim}}>Gasto total acumulado</span><span style={{fontSize:20,fontWeight:900,color:C.danger}}>{fmt.eur(totalGasto)}</span></div>}
+      {bds.length===0&&!adding&&<div style={{textAlign:"center",padding:"40px 20px",color:C.dim}}><div style={{fontSize:36,marginBottom:8}}>🔩</div><div>Sin averías registradas</div></div>}
+      {bds.map((b,i)=>{
+        const billTotal=(b.bills||[]).reduce((s,bi)=>s+(parseFloat(bi.amount)||0),0);
+        const exp=expanded===i;
+        return(
+          <div key={b.id} style={{background:C.card,borderRadius:14,padding:14,marginBottom:10,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.danger}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+              <div style={{flex:1}}><div style={{fontSize:14,fontWeight:800,marginBottom:2}}>{b.description||"Sin descripción"}</div><div style={{fontSize:11,color:C.dim}}>{b.workshop?`${b.workshop} · `:""}{fmt.date(b.date)}</div></div>
+              <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}><Pill c={C.danger}>{fmt.eur(parseFloat(b.price)||billTotal)}</Pill><button onClick={()=>del(b.id)} style={ghostBtn(C.danger)}>✕</button></div>
+            </div>
+            {b.workshopAddress&&<div style={{marginBottom:8}}><MapBtn addr={b.workshopAddress} label={b.workshop||"Ver taller"}/></div>}
+            {b.notes&&<div style={{fontSize:11,color:C.dim,marginBottom:6}}>{b.notes}</div>}
+            <button onClick={()=>setExpanded(exp?null:i)} style={{...ghostBtn(C.warn),fontSize:11,padding:"4px 10px"}}>🧾 {(b.bills||[]).length} factura{(b.bills||[]).length!==1?"s":""}{billTotal>0?` · ${fmt.eur(billTotal)}`:""} {exp?"▲":"▼"}</button>
+            {exp&&(
+              <div style={{marginTop:10,background:C.bg,borderRadius:10,padding:10}}>
+                {(b.bills||[]).map((bi,bi_i)=>(
+                  <div key={bi_i} style={{padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div><div style={{fontSize:12,fontWeight:600}}>{bi.concept||"Factura"}</div><div style={{fontSize:10,color:C.dim}}>{fmt.date(bi.date)}</div></div>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:13,fontWeight:700}}>{fmt.eur(bi.amount)}</span><button onClick={()=>delBill(i,bi_i)} style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:11}}>✕</button></div>
+                    </div>
+                  </div>
+                ))}
+                <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
+                  <input placeholder="Concepto" value={billForm.concept} onChange={e=>setBillForm(p=>({...p,concept:e.target.value}))} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 9px",color:C.text,fontSize:11,outline:"none",flex:2,minWidth:80}}/>
+                  <input type="date" value={billForm.date} onChange={e=>setBillForm(p=>({...p,date:e.target.value}))} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 9px",color:C.text,fontSize:11,outline:"none",flex:1,minWidth:90}}/>
+                  <input type="number" placeholder="€" value={billForm.amount} onChange={e=>setBillForm(p=>({...p,amount:e.target.value}))} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 9px",color:C.text,fontSize:11,outline:"none",flex:1,minWidth:55}}/>
+                  <button onClick={()=>addBill(i)} style={{...primaryBtn(C.warn),padding:"6px 14px",fontSize:11,borderRadius:8}}>+ Añadir</button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {adding?(
+        <div style={{background:C.card,borderRadius:14,padding:14,border:`1px dashed ${C.border}`}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.warn,marginBottom:12,textTransform:"uppercase",letterSpacing:"0.06em"}}>+ Nueva avería</div>
+          <Field label="Avería / descripción" value={form.description} onChange={v=>setForm(p=>({...p,description:v}))} placeholder="Ej: Embrague desgastado"/>
+          <Field label="Taller" value={form.workshop} onChange={v=>setForm(p=>({...p,workshop:v}))} placeholder="Nombre del taller"/>
+          <Field label="Dirección del taller" value={form.workshopAddress} onChange={v=>setForm(p=>({...p,workshopAddress:v}))} placeholder="Para abrir en Google Maps"/>
+          <Field label="Fecha" type="date" value={form.date} onChange={v=>setForm(p=>({...p,date:v}))}/>
+          <Field label="Coste total (€)" type="number" value={form.price} onChange={v=>setForm(p=>({...p,price:v}))} placeholder="0.00"/>
+          <Field label="Notas" value={form.notes} onChange={v=>setForm(p=>({...p,notes:v}))} placeholder="Observaciones..."/>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>setAdding(false)} style={ghostBtn(C.dim)}>Cancelar</button>
+            <button onClick={add} style={{...primaryBtn(C.warn),flex:1}}>Añadir avería</button>
+          </div>
+        </div>
+      ):<button onClick={()=>setAdding(true)} style={{...ghostBtn(C.warn),width:"100%",justifyContent:"center"}}>+ Añadir avería</button>}
+      <SectionDocs vehicle={vehicle} sectionKey="breakdowns" onUpdate={onUpdate} accent={C.warn} docTypes={["Factura del taller","Presupuesto","Fotografías del daño","Informe perito","Garantía de reparación","Otro"]}/>
+    </SectionLayout>
+  );
+}
+
+// ════════════════════════════════════════════
+// PARTES DEL SEGURO
+// ════════════════════════════════════════════
+function ClaimsView({vehicle,onBack,onUpdate}){
+  const claims=vehicle.claims||[];
+  const[adding,setAdding]=useState(false);
+  const[expanded,setExpanded]=useState(null);
+  const blank={id:"",date:"",repairDate:"",cause:"",damages:"",price:"",liability:"Propio",status:"Abierto",workshop:"",workshopAddress:"",insRef:"",notes:"",bills:[]};
+  const[form,setForm]=useState(blank);
+  const[billForm,setBillForm]=useState({concept:"",date:"",amount:"",attach:null});
+  const openCount=claims.filter(c=>c.status==="Abierto").length;
+  const totalGasto=claims.reduce((s,c)=>{const bt=(c.bills||[]).reduce((t,b)=>t+(parseFloat(b.amount)||0),0);return s+(parseFloat(c.price)||bt||0);},0);
+  const add=()=>{onUpdate({...vehicle,claims:[{...form,id:Date.now().toString()},...claims]});setForm(blank);setAdding(false);};
+  const del=id=>onUpdate({...vehicle,claims:claims.filter(c=>c.id!==id)});
+  const toggleStatus=id=>{const list=claims.map(c=>c.id===id?{...c,status:c.status==="Abierto"?"Cerrado":"Abierto"}:c);onUpdate({...vehicle,claims:list});};
+  const addBill=idx=>{if(!billForm.amount)return;const list=[...claims];list[idx]={...list[idx],bills:[...(list[idx].bills||[]),{...billForm}]};onUpdate({...vehicle,claims:list});setBillForm({concept:"",date:"",amount:"",attach:null});};
+  const delBill=(cIdx,bIdx)=>{const list=[...claims];list[cIdx]={...list[cIdx],bills:list[cIdx].bills.filter((_,i)=>i!==bIdx)};onUpdate({...vehicle,claims:list});};
+  return(
+    <SectionLayout title="Partes del seguro" emoji="📋" col={C.pink} onBack={onBack}>
+      {claims.length>0&&(
+        <div style={{background:C.card,borderRadius:14,padding:"12px 16px",marginBottom:12,border:`1px solid ${C.border}`,display:"flex",gap:16}}>
+          <div style={{flex:1,textAlign:"center"}}><div style={{fontSize:10,color:C.dim,marginBottom:2}}>Partes abiertos</div><div style={{fontSize:20,fontWeight:900,color:openCount>0?C.danger:C.ok}}>{openCount}</div></div>
+          <div style={{width:1,background:C.border}}/>
+          <div style={{flex:1,textAlign:"center"}}><div style={{fontSize:10,color:C.dim,marginBottom:2}}>Cerrados</div><div style={{fontSize:20,fontWeight:900,color:C.dim}}>{claims.length-openCount}</div></div>
+          <div style={{width:1,background:C.border}}/>
+          <div style={{flex:1,textAlign:"center"}}><div style={{fontSize:10,color:C.dim,marginBottom:2}}>Coste total</div><div style={{fontSize:16,fontWeight:900,color:C.pink}}>{fmt.eur(totalGasto)}</div></div>
+        </div>
+      )}
+      {claims.length===0&&!adding&&<div style={{textAlign:"center",padding:"40px 20px",color:C.dim}}><div style={{fontSize:36,marginBottom:8}}>📋</div><div>Sin partes registrados</div></div>}
+      {claims.map((c,i)=>{
+        const col=c.status==="Abierto"?C.danger:C.ok;
+        const exp=expanded===i;
+        const bt=(c.bills||[]).reduce((s,b)=>s+(parseFloat(b.amount)||0),0);
+        return(
+          <div key={c.id} style={{background:C.card,borderRadius:14,padding:14,marginBottom:10,border:`1px solid ${C.border}`,borderLeft:`3px solid ${col}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+              <div style={{flex:1}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                  <div style={{fontSize:14,fontWeight:800}}>{c.cause||"Sin causa"}</div>
+                  <button onClick={()=>toggleStatus(c.id)} style={{...ghostBtn(col),padding:"1px 7px",fontSize:9}}>{c.status||"Abierto"}</button>
+                </div>
+                <div style={{fontSize:11,color:C.dim}}>{c.date?`Parte: ${fmt.date(c.date)}`:""}{c.repairDate?` · Rep.: ${fmt.date(c.repairDate)}`:""}</div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}><Pill c={C.pink}>{fmt.eur(parseFloat(c.price)||bt)}</Pill><button onClick={()=>del(c.id)} style={ghostBtn(C.danger)}>✕</button></div>
+            </div>
+            {c.damages&&<div style={{fontSize:12,color:C.dim,marginBottom:6}}>🔴 Daños: {c.damages}</div>}
+            {c.insRef&&<div style={{fontSize:11,color:C.dim,marginBottom:6}}>Ref. siniestro: <span style={{color:C.text}}>{c.insRef}</span></div>}
+            {c.workshopAddress&&<div style={{marginBottom:8}}><MapBtn addr={c.workshopAddress} label={c.workshop||"Ver taller"}/></div>}
+            <button onClick={()=>setExpanded(exp?null:i)} style={{...ghostBtn(C.pink),fontSize:10,padding:"3px 9px"}}>🧾 {(c.bills||[]).length} factura{(c.bills||[]).length!==1?"s":""}{bt>0?` · ${fmt.eur(bt)}`:""} {exp?"▲":"▼"}</button>
+            {exp&&(
+              <div style={{marginTop:10,background:C.bg,borderRadius:10,padding:10}}>
+                {(c.bills||[]).map((bi,bi_i)=>(
+                  <div key={bi_i} style={{padding:"7px 0",borderBottom:`1px solid ${C.border}`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div><div style={{fontSize:12,fontWeight:600}}>{bi.concept||"Factura"}</div><div style={{fontSize:10,color:C.dim}}>{fmt.date(bi.date)}</div></div>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:13,fontWeight:700}}>{fmt.eur(bi.amount)}</span><button onClick={()=>delBill(i,bi_i)} style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:11}}>✕</button></div>
+                    </div>
+                  </div>
+                ))}
+                <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
+                  <input placeholder="Concepto" value={billForm.concept} onChange={e=>setBillForm(p=>({...p,concept:e.target.value}))} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 9px",color:C.text,fontSize:11,outline:"none",flex:2,minWidth:80}}/>
+                  <input type="date" value={billForm.date} onChange={e=>setBillForm(p=>({...p,date:e.target.value}))} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 9px",color:C.text,fontSize:11,outline:"none",flex:1,minWidth:90}}/>
+                  <input type="number" placeholder="€" value={billForm.amount} onChange={e=>setBillForm(p=>({...p,amount:e.target.value}))} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 9px",color:C.text,fontSize:11,outline:"none",flex:1,minWidth:55}}/>
+                  <button onClick={()=>addBill(i)} style={{...primaryBtn(C.pink),padding:"6px 14px",fontSize:11,borderRadius:8}}>+</button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {adding?(
+        <div style={{background:C.card,borderRadius:14,padding:14,border:`1px dashed ${C.border}`}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.pink,marginBottom:12,textTransform:"uppercase",letterSpacing:"0.06em"}}>+ Nuevo parte</div>
+          <Field label="Causa / descripción" value={form.cause} onChange={v=>setForm(p=>({...p,cause:v}))} placeholder="Ej: Golpe en parking"/>
+          <Field label="Daños" value={form.damages} onChange={v=>setForm(p=>({...p,damages:v}))} placeholder="Ej: Parachoques trasero"/>
+          <div style={{display:"flex",gap:10}}>
+            <div style={{flex:1}}><Field label="Fecha parte" type="date" value={form.date} onChange={v=>setForm(p=>({...p,date:v}))}/></div>
+            <div style={{flex:1}}><Field label="Fecha reparación" type="date" value={form.repairDate} onChange={v=>setForm(p=>({...p,repairDate:v}))}/></div>
+          </div>
+          <Sel label="Responsabilidad" value={form.liability} onChange={v=>setForm(p=>({...p,liability:v}))} opts={[{v:"Propio",l:"⚠️ Propio"},{v:"Contrario",l:"✅ Del contrario"},{v:"Compartido",l:"⚖️ Compartido"},{v:"Fuerza mayor",l:"🌩️ Fuerza mayor"}]}/>
+          <Sel label="Estado" value={form.status} onChange={v=>setForm(p=>({...p,status:v}))} opts={[{v:"Abierto",l:"🔴 Abierto"},{v:"En tramitación",l:"🟡 En tramitación"},{v:"Cerrado",l:"✅ Cerrado"}]}/>
+          <Field label="Coste total (€)" type="number" value={form.price} onChange={v=>setForm(p=>({...p,price:v}))} placeholder="0.00"/>
+          <Field label="Referencia siniestro" value={form.insRef} onChange={v=>setForm(p=>({...p,insRef:v}))} placeholder="Ej: SIN-2024-123456"/>
+          <Field label="Taller / perito" value={form.workshop} onChange={v=>setForm(p=>({...p,workshop:v}))} placeholder="Nombre del taller"/>
+          <Field label="Dirección del taller" value={form.workshopAddress} onChange={v=>setForm(p=>({...p,workshopAddress:v}))} placeholder="Para abrir en mapa"/>
+          <Field label="Notas" value={form.notes} onChange={v=>setForm(p=>({...p,notes:v}))} placeholder="Observaciones..."/>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>setAdding(false)} style={ghostBtn(C.dim)}>Cancelar</button>
+            <button onClick={add} style={{...primaryBtn(C.pink),flex:1}}>Añadir parte</button>
+          </div>
+        </div>
+      ):<button onClick={()=>setAdding(true)} style={{...ghostBtn(C.pink),width:"100%",justifyContent:"center",marginBottom:8}}>+ Añadir parte</button>}
+      <SectionDocs vehicle={vehicle} sectionKey="claims" onUpdate={onUpdate} accent={C.pink} docTypes={["Declaración amistosa","Fotografías del siniestro","Informe del perito","Factura de reparación","Resolución aseguradora","Denuncia","Otro"]}/>
+    </SectionLayout>
+  );
+}
+
+// ════════════════════════════════════════════
+// COMBUSTIBLE
+// ════════════════════════════════════════════
+const FUEL_COL="#16a085";
+function FuelView({vehicle,onBack,onUpdate}){
+  const logs=vehicle.fuelLogs||[];
+  const[adding,setAdding]=useState(false);
+  const blank={date:"",liters:"",pricePerL:"",total:"",km:"",station:"",fuelType:"",notes:""};
+  const[form,setForm]=useState(blank);
+  const updForm=(k,v)=>{setForm(p=>{const next={...p,[k]:v};if((k==="liters"||k==="pricePerL")&&next.liters&&next.pricePerL){next.total=(parseFloat(next.liters)*parseFloat(next.pricePerL)).toFixed(2);}return next;});};
+  const totalGasto=logs.reduce((s,l)=>s+(parseFloat(l.total)||0),0);
+  const totalLitros=logs.reduce((s,l)=>s+(parseFloat(l.liters)||0),0);
+  const consumMedio=(()=>{const wk=logs.filter(l=>l.km&&l.liters);if(wk.length<2)return null;const sorted=[...wk].sort((a,b)=>parseInt(a.km)-parseInt(b.km));const kmD2=parseInt(sorted[sorted.length-1].km)-parseInt(sorted[0].km);const litTot=sorted.slice(1).reduce((s,l)=>s+(parseFloat(l.liters)||0),0);return kmD2>0?(litTot/kmD2*100).toFixed(1):null;})();
+  const add=()=>{onUpdate({...vehicle,fuelLogs:[{...form,id:Date.now().toString()},...logs]});setForm(blank);setAdding(false);};
+  const del=id=>onUpdate({...vehicle,fuelLogs:logs.filter(l=>l.id!==id)});
+  return(
+    <SectionLayout title="Combustible" emoji="⛽" col={FUEL_COL} onBack={onBack}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
+        {[{l:"Total gastado",v:fmt.eur(totalGasto),c:C.gold},{l:"Litros totales",v:totalLitros>0?`${totalLitros.toFixed(0)}L`:"—",c:FUEL_COL},{l:"Consumo medio",v:consumMedio?`${consumMedio}L/100km`:"—",c:C.teal}].map(s=>(
+          <div key={s.l} style={{background:C.card,borderRadius:12,padding:"10px 10px",border:`1px solid ${C.border}`,textAlign:"center"}}>
+            <div style={{fontSize:9,color:C.dim,marginBottom:3,textTransform:"uppercase",letterSpacing:"0.07em"}}>{s.l}</div>
+            <div style={{fontSize:13,fontWeight:800,color:s.c}}>{s.v}</div>
+          </div>
+        ))}
+      </div>
+      {logs.length===0&&!adding&&<div style={{textAlign:"center",padding:"40px 20px",color:C.dim}}><div style={{fontSize:36,marginBottom:8}}>⛽</div><div>Sin repostajes registrados</div></div>}
+      {logs.map(l=>(
+        <div key={l.id} style={{background:C.card,borderRadius:14,padding:14,marginBottom:10,border:`1px solid ${C.border}`,borderLeft:`3px solid ${FUEL_COL}`}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+            <div><div style={{fontSize:14,fontWeight:800}}>{fmt.date(l.date)||"Sin fecha"}{l.fuelType?` · ${l.fuelType}`:""}</div><div style={{fontSize:11,color:C.dim}}>{l.station||""}{l.km?` · ${fmt.km(l.km)}`:""}</div></div>
+            <div style={{display:"flex",alignItems:"center",gap:8}}><Pill c={FUEL_COL}>{fmt.eur(l.total)}</Pill><button onClick={()=>del(l.id)} style={ghostBtn(C.danger)}>✕</button></div>
+          </div>
+          <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
+            {l.liters&&<InfoChip label="Litros" val={`${l.liters} L`}/>}
+            {l.pricePerL&&<InfoChip label="€/Litro" val={`${parseFloat(l.pricePerL).toFixed(3)} €`}/>}
+            {l.notes&&<InfoChip label="Notas" val={l.notes}/>}
+          </div>
+        </div>
+      ))}
+      {adding?(
+        <div style={{background:C.card,borderRadius:14,padding:14,border:`1px dashed ${C.border}`}}>
+          <div style={{fontSize:11,fontWeight:700,color:FUEL_COL,marginBottom:12,textTransform:"uppercase",letterSpacing:"0.06em"}}>+ Nuevo repostaje</div>
+          <Field label="Fecha" type="date" value={form.date} onChange={v=>updForm("date",v)}/>
+          <div style={{display:"flex",gap:10}}>
+            <div style={{flex:1}}><Field label="Litros" type="number" value={form.liters} onChange={v=>updForm("liters",v)} placeholder="0.00"/></div>
+            <div style={{flex:1}}><Field label="€ / litro" type="number" value={form.pricePerL} onChange={v=>updForm("pricePerL",v)} placeholder="1.650"/></div>
+          </div>
+          <Field label="Total (€) — se calcula solo" type="number" value={form.total} onChange={v=>updForm("total",v)} placeholder="0.00"/>
+          <Field label="Km al repostar" type="number" value={form.km} onChange={v=>updForm("km",v)} placeholder="Para calcular consumo"/>
+          <Sel label="Tipo de combustible" value={form.fuelType} onChange={v=>updForm("fuelType",v)} opts={[{v:"",l:"— Sin especificar"},{v:"Gasolina 95",l:"Gasolina 95"},{v:"Gasolina 98",l:"Gasolina 98"},{v:"Diésel",l:"Diésel"},{v:"Diésel Plus",l:"Diésel Plus"},{v:"GLP",l:"GLP"},{v:"Adblue",l:"Adblue"}]}/>
+          <Field label="Gasolinera" value={form.station} onChange={v=>updForm("station",v)} placeholder="Ej: Repsol Parla"/>
+          <Field label="Notas" value={form.notes} onChange={v=>updForm("notes",v)} placeholder="Observaciones..."/>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>setAdding(false)} style={ghostBtn(C.dim)}>Cancelar</button>
+            <button onClick={add} style={{...primaryBtn(FUEL_COL),flex:1}}>Guardar repostaje</button>
+          </div>
+        </div>
+      ):<button onClick={()=>setAdding(true)} style={{...ghostBtn(FUEL_COL),width:"100%",justifyContent:"center",marginBottom:8}}>+ Añadir repostaje</button>}
+    </SectionLayout>
+  );
+}
+
+// ════════════════════════════════════════════
+// ESCÁNER
+// ════════════════════════════════════════════
+const SCAN_DESTINATIONS=[
+  {id:"itv",label:"🔧 ITV",hint:"Tarjeta ITV, informe inspección, cita previa"},
+  {id:"insurance",label:"🛡️ Seguro",hint:"Póliza, recibo, certificado, carta verde"},
+  {id:"ivtm",label:"🏛️ IVTM",hint:"Recibo de pago del impuesto"},
+  {id:"revisions",label:"⚙️ Revisión",hint:"Factura de taller, albarán, presupuesto"},
+  {id:"breakdowns",label:"🔩 Avería",hint:"Factura reparación, presupuesto, garantía"},
+  {id:"claims",label:"📋 Parte del seguro",hint:"Declaración amistosa, informe perito, factura"},
+  {id:"fuel",label:"⛽ Combustible",hint:"Ticket repostaje"},
+];
+
+const EXTRACT_SYSTEM=`Eres un asistente especializado en documentos de vehículos españoles. Analiza la imagen y extrae TODOS los datos visibles. Responde SOLO con un JSON sin backticks con esta estructura:
+{"tipoDoc":"tipo de documento detectado en español","destino":"uno de: itv, insurance, ivtm, revisions, breakdowns, claims, fuel","confianza":"alta|media|baja","campos":{"date":"fecha principal YYYY-MM-DD","price":"importe total sin símbolo €","company":"empresa/compañía","description":"descripción principal","reference":"nº referencia, póliza, expediente","result":"resultado ITV si aplica","expiry":"fecha vencimiento YYYY-MM-DD","km":"kilometraje si aparece","liters":"litros si es combustible","pricePerL":"precio por litro si es combustible","workshop":"taller o establecimiento","address":"dirección si aparece","notes":"datos adicionales relevantes"}}
+Si no puedes leer un campo, omítelo. No inventes datos.`;
+
+function ScannerView({vehicle,onBack,onUpdate}){
+  const[phase,setPhase]=useState("upload");
+  const[imgB64,setImgB64]=useState(null);
+  const[imgPreview,setPreview]=useState(null);
+  const[loading,setLoading]=useState(false);
+  const[error,setError]=useState(null);
+  const[result,setResult]=useState(null);
+  const[campos,setCampos]=useState({});
+  const[destino,setDestino]=useState("");
+  const inputRef=useRef();
+
+  const handleFile=async(e)=>{
+    const file=e.target.files?.[0]; if(!file) return;
+    setError(null);
+    const reader=new FileReader();
+    reader.onload=ev=>setPreview(ev.target.result);
+    reader.readAsDataURL(file);
+    const b64full=await compressImage(file,1600,0.8);
+    setImgB64(b64full.split(",")[1]);
+    setPhase("ready");
+  };
+
+  const analyze=async()=>{
+    if(!imgB64) return;
+    setLoading(true); setError(null); setPhase("analyzing");
+    try{
+      const resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1000,system:EXTRACT_SYSTEM,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:"image/jpeg",data:imgB64}},{type:"text",text:"Extrae todos los datos de este documento de vehículo."}]}]})});
+      const data=await resp.json();
+      const text=data.content?.find(b=>b.type==="text")?.text||"";
+      const json=JSON.parse(text.trim().replace(/```json|```/g,"").trim());
+      setResult(json); setCampos(json.campos||{}); setDestino(json.destino||"breakdowns"); setPhase("review");
+    }catch(err){setError("No se pudo analizar el documento. Inténtalo de nuevo.");setPhase("ready");}
+    setLoading(false);
+  };
+
+  const save=()=>{
+    const c=campos; const id=Date.now().toString();
+    let updated=JSON.parse(JSON.stringify(vehicle));
+    const attach=imgPreview?{type:"img",name:"doc_escaneado.jpg",size:Math.round((imgB64||"").length*0.75/1024),data:imgPreview,driveOnly:false}:null;
+    if(destino==="itv"){updated.itv={...updated.itv,expiry:c.expiry||updated.itv?.expiry||"",result:c.result||updated.itv?.result||"",price:c.price||updated.itv?.price||"",station:c.workshop||updated.itv?.station||""};updated.itvHistory=[{expiry:c.expiry||"",result:c.result||"",price:c.price||"",station:c.workshop||"",date:c.date||"",notes:c.notes||"",archivedAt:c.date||new Date().toISOString().slice(0,10)},...(updated.itvHistory||[])];}
+    else if(destino==="insurance"){updated.insuranceHistory=[{company:c.company||"",type:"",price:c.price||"",expiry:c.expiry||"",policyNum:c.reference||"",promotions:"",notes:c.notes||"",archivedAt:c.date||new Date().toISOString().slice(0,10)},...(updated.insuranceHistory||[])];}
+    else if(destino==="ivtm"){updated.ivtmHistory=[{year:c.date?.slice(0,4)||"",date:c.date||"",price:c.price||"",municipality:c.workshop||"",reference:c.reference||"",notes:c.notes||"",archivedAt:c.date||new Date().toISOString().slice(0,10)},...(updated.ivtmHistory||[])];}
+    else if(destino==="revisions"){updated.revisions=[{id,name:c.description||"Revisión",items:c.notes||"",lastDate:c.date||"",lastKm:c.km||"",price:c.price||"",workshop:c.workshop||"",workshopAddress:c.address||"",nextKm:"",nextDate:""},...(updated.revisions||[])];}
+    else if(destino==="breakdowns"){updated.breakdowns=[{id,description:c.description||"Avería",workshop:c.workshop||"",workshopAddress:c.address||"",date:c.date||"",price:c.price||"",notes:c.notes||"",bills:[{concept:c.description||"Factura",date:c.date||"",amount:c.price||"",attach}]},...(updated.breakdowns||[])];}
+    else if(destino==="claims"){updated.claims=[{id,cause:c.description||"Siniestro",date:c.date||"",price:c.price||"",insRef:c.reference||"",workshop:c.workshop||"",notes:c.notes||"",status:"Abierto",liability:"",damages:"",bills:[{concept:c.description||"Documento",date:c.date||"",amount:c.price||"",attach}]},...(updated.claims||[])];}
+    else if(destino==="fuel"){updated.fuelLogs=[{id,date:c.date||"",liters:c.liters||"",pricePerL:c.pricePerL||"",total:c.price||"",station:c.workshop||"",notes:c.notes||""},...(updated.fuelLogs||[])];}
+    else{const key=destino;const newDoc={id,type:result?.tipoDoc||"Documento escaneado",name:c.reference||c.description||"",notes:c.notes||"",attach};updated[key]=[newDoc,...(updated[key]||[])];}
+    onUpdate(updated); setPhase("saved");
+  };
+
+  const upd=(k,v)=>setCampos(p=>({...p,[k]:v}));
+  const destInfo=SCAN_DESTINATIONS.find(d=>d.id===destino);
+
+  return(
+    <SectionLayout title="Escanear documento" emoji="📸" col={C.gold} onBack={onBack}>
+      {(phase==="upload"||phase==="ready")&&(
+        <>
+          <div onClick={()=>inputRef.current?.click()} style={{background:C.card,borderRadius:16,border:`2px dashed ${imgPreview?C.gold:C.border}`,minHeight:200,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",marginBottom:12,overflow:"hidden"}}>
+            {imgPreview?<img src={imgPreview} alt="doc" style={{width:"100%",maxHeight:280,objectFit:"contain"}}/>:<><div style={{fontSize:48,marginBottom:10}}>📄</div><div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:4}}>Toca para subir documento</div><div style={{fontSize:11,color:C.dim}}>Foto de ITV, factura, seguro…</div></>}
+          </div>
+          <input ref={inputRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleFile}/>
+          {error&&<div style={{background:"#c0392b22",border:"1px solid #c0392b44",borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:12,color:C.danger}}>{error}</div>}
+          {imgPreview&&(
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>{setImgB64(null);setPreview(null);setPhase("upload");}} style={{...ghostBtn(C.dim),flex:1,justifyContent:"center"}}>🗑️ Quitar</button>
+              <button onClick={analyze} style={{...primaryBtn(C.gold,"#080c18"),flex:2,fontSize:15}}>🔍 Analizar documento</button>
+            </div>
+          )}
+        </>
+      )}
+      {phase==="analyzing"&&(
+        <div style={{textAlign:"center",padding:"60px 20px"}}>
+          <div style={{fontSize:48,marginBottom:16,display:"inline-block",animation:"spin 1s linear infinite"}}>🔍</div>
+          <div style={{fontSize:16,fontWeight:700,color:C.text,marginBottom:8}}>Analizando documento…</div>
+          <div style={{fontSize:12,color:C.dim}}>Claude está leyendo y extrayendo los datos</div>
+        </div>
+      )}
+      {phase==="review"&&result&&(
+        <>
+          <div style={{background:`linear-gradient(135deg,${C.gold}22,${C.card})`,border:`1px solid ${C.gold}44`,borderRadius:14,padding:14,marginBottom:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+              <div><div style={{fontSize:11,color:C.gold,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:4}}>Documento detectado</div><div style={{fontSize:16,fontWeight:800,color:C.text}}>{result.tipoDoc}</div></div>
+              <Pill c={result.confianza==="alta"?C.ok:result.confianza==="media"?C.warn:C.danger}>{result.confianza==="alta"?"✓ Alta":result.confianza==="media"?"⚠ Media":"⚠ Baja"}</Pill>
+            </div>
+          </div>
+          {imgPreview&&<div style={{marginBottom:12,borderRadius:12,overflow:"hidden",maxHeight:140}}><img src={imgPreview} alt="doc" style={{width:"100%",objectFit:"contain",background:C.card}}/></div>}
+          <div style={{background:C.card,borderRadius:14,padding:14,marginBottom:12,border:`1px solid ${C.border}`}}>
+            <label style={{fontSize:10,color:C.dim,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.08em",display:"block",marginBottom:8}}>📂 Guardar en</label>
+            <select value={destino} onChange={e=>setDestino(e.target.value)} style={{width:"100%",background:C.input,border:`1px solid ${C.border}`,borderRadius:9,padding:"10px 14px",color:C.text,fontSize:14,outline:"none"}}>
+              {SCAN_DESTINATIONS.map(d=><option key={d.id} value={d.id}>{d.label}</option>)}
+            </select>
+            {destInfo&&<div style={{fontSize:11,color:C.dim,marginTop:6}}>💡 {destInfo.hint}</div>}
+          </div>
+          <div style={{background:C.card,borderRadius:14,padding:14,marginBottom:12,border:`1px solid ${C.border}`}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.gold,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:14}}>✏️ Revisa y corrige los datos</div>
+            <Field label="Fecha del documento" type="date" value={campos.date} onChange={v=>upd("date",v)}/>
+            <Field label="Importe (€)" type="number" value={campos.price} onChange={v=>upd("price",v)} placeholder="0.00"/>
+            <Field label="Empresa / compañía / taller" value={campos.company||campos.workshop} onChange={v=>{upd("company",v);upd("workshop",v);}} placeholder=""/>
+            <Field label="Descripción / concepto" value={campos.description} onChange={v=>upd("description",v)} placeholder=""/>
+            <Field label="Referencia / nº expediente" value={campos.reference} onChange={v=>upd("reference",v)} placeholder=""/>
+            {destino==="itv"&&<Field label="Resultado ITV" value={campos.result} onChange={v=>upd("result",v)} placeholder="Favorable / Desfavorable"/>}
+            {(destino==="itv"||destino==="insurance")&&<Field label="Fecha vencimiento" type="date" value={campos.expiry} onChange={v=>upd("expiry",v)}/>}
+            {destino==="fuel"&&<><Field label="Litros" type="number" value={campos.liters} onChange={v=>upd("liters",v)} placeholder="0.00"/><Field label="€ / litro" type="number" value={campos.pricePerL} onChange={v=>upd("pricePerL",v)} placeholder="1.650"/></>}
+            <Field label="Km (si aparece)" type="number" value={campos.km} onChange={v=>upd("km",v)} placeholder=""/>
+            <Field label="Dirección (si aparece)" value={campos.address} onChange={v=>upd("address",v)} placeholder=""/>
+            <Field label="Notas adicionales" value={campos.notes} onChange={v=>upd("notes",v)} placeholder="Cualquier dato extra…"/>
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={()=>{setPhase("ready");setResult(null);}} style={{...ghostBtn(C.dim),flex:1,justifyContent:"center"}}>← Volver</button>
+            <button onClick={save} style={{...primaryBtn(C.gold,"#080c18"),flex:2,fontSize:15}}>💾 Guardar</button>
+          </div>
+        </>
+      )}
+      {phase==="saved"&&(
+        <div style={{textAlign:"center",padding:"60px 20px"}}>
+          <div style={{fontSize:64,marginBottom:16}}>✅</div>
+          <div style={{fontSize:18,fontWeight:900,color:C.ok,marginBottom:8}}>¡Guardado!</div>
+          <div style={{fontSize:13,color:C.dim,marginBottom:24}}>Guardado en <strong style={{color:C.text}}>{destInfo?.label||destino}</strong></div>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            <button onClick={()=>{setPhase("upload");setImgB64(null);setPreview(null);setResult(null);setCampos({});}} style={{...primaryBtn(C.blue),width:"100%"}}>📸 Escanear otro documento</button>
+            <button onClick={onBack} style={{...ghostBtn(C.dim),width:"100%",justifyContent:"center"}}>← Volver al coche</button>
+          </div>
+        </div>
+      )}
+    </SectionLayout>
+  );
+}
+
+// ════════════════════════════════════════════
+// EDITAR VEHÍCULO
+// ════════════════════════════════════════════
+function VehicleEditForm({vehicle,onSave,onCancel}){
+  const[v,setV]=useState(vehicle);
+  const upd=(path,val)=>{setV(prev=>{const c=JSON.parse(JSON.stringify(prev));const ks=path.split(".");let cur=c;for(let i=0;i<ks.length-1;i++)cur=cur[ks[i]]=(cur[ks[i]]||{});cur[ks[ks.length-1]]=val;return c;});};
+  const[sec,setSec]=useState("datos");
+  const secs=[{id:"datos",l:"🚗 Datos"},{id:"ruedas",l:"🔵 Ruedas"},{id:"itv",l:"🔧 ITV"},{id:"seguro",l:"🛡️ Seguro"},{id:"ficha",l:"📄 Ficha"}];
+  return(
+    <div style={{minHeight:"100vh",background:C.bg,paddingBottom:32}}>
+      <div style={{background:C.panel,padding:"16px 20px",borderBottom:`1px solid ${C.border}`,position:"sticky",top:0,zIndex:50,display:"flex",alignItems:"center",gap:12}}>
+        <Back onClick={onCancel}/>
+        <div style={{flex:1,fontSize:15,fontWeight:800}}>{v.name||"Editar vehículo"}</div>
+        <button onClick={()=>onSave(v)} style={{background:C.goldDim,border:`1px solid ${C.gold}44`,color:C.gold,borderRadius:9,padding:"6px 16px",fontSize:12,fontWeight:700,cursor:"pointer"}}>💾 Guardar</button>
+      </div>
+      <div style={{display:"flex",gap:8,padding:"12px 16px",overflowX:"auto",scrollbarWidth:"none"}}>
+        {secs.map(s=><button key={s.id} onClick={()=>setSec(s.id)} style={{whiteSpace:"nowrap",padding:"6px 14px",borderRadius:20,border:`1px solid ${sec===s.id?C.gold:C.border}`,background:sec===s.id?C.goldDim:C.card,color:sec===s.id?C.gold:C.dim,fontSize:12,fontWeight:600,cursor:"pointer"}}>{s.l}</button>)}
+      </div>
+      <div style={{padding:"0 16px"}}>
+        {sec==="datos"&&<div style={{background:C.card,borderRadius:14,padding:16,border:`1px solid ${C.border}`}}>
+          <PhotoUploader label="Foto del vehículo" value={v.photo} onChange={val=>upd("photo",val)} maxW={800} quality={0.6} size={140}/>
+          <Field label="Nombre / alias" value={v.name} onChange={val=>upd("name",val)} placeholder="Ej: Coche familiar"/>
+          <Field label="Matrícula" value={v.plate} onChange={val=>upd("plate",val)} placeholder="Ej: 1234 ABC"/>
+          <Field label="Marca" value={v.brand} onChange={val=>upd("brand",val)} placeholder="Ej: Seat"/>
+          <Field label="Modelo" value={v.model} onChange={val=>upd("model",val)} placeholder="Ej: León"/>
+          <Field label="Año" type="number" value={v.year} onChange={val=>upd("year",val)} placeholder="Ej: 2019"/>
+          <Sel label="Tipo de vehículo" value={v.vehicleType} onChange={val=>upd("vehicleType",val)} opts={[{v:"Turismo",l:"Turismo"},{v:"SUV",l:"SUV"},{v:"Monovolumen",l:"Monovolumen"},{v:"Furgoneta",l:"Furgoneta"},{v:"Moto",l:"Moto"}]}/>
+          <Sel label="Combustible" value={v.fuel} onChange={val=>upd("fuel",val)} opts={[{v:"",l:"—"},{v:"Gasolina",l:"⛽ Gasolina"},{v:"Diésel",l:"⛽ Diésel"},{v:"Híbrido",l:"🔋 Híbrido"},{v:"Eléctrico",l:"⚡ Eléctrico"},{v:"GLP",l:"🔵 GLP"}]}/>
+          <Field label="Color" value={v.color} onChange={val=>upd("color",val)} placeholder="Ej: Blanco perla"/>
+          <Field label="Potencia (CV)" type="number" value={v.power} onChange={val=>upd("power",val)} placeholder="Ej: 115"/>
+          <Field label="Kilometraje actual" type="number" value={v.currentKm} onChange={val=>upd("currentKm",val)} placeholder="Ej: 45000"/>
+          <Field label="Fecha de matriculación" type="date" value={v.regDate} onChange={val=>upd("regDate",val)}/>
+          <Field label="Nº bastidor (VIN)" value={v.vin} onChange={val=>upd("vin",val)} placeholder="17 caracteres"/>
+          <Field label="Notas" value={v.notes} onChange={val=>upd("notes",val)} placeholder="Cualquier información útil..."/>
+        </div>}
+        {sec==="ruedas"&&<div style={{background:C.card,borderRadius:14,padding:16,border:`1px solid ${C.border}`}}>
+          <Sel label="Tipo de ruedas" value={v.tyreType} onChange={val=>upd("tyreType",val)} opts={[{v:"",l:"—"},{v:"Verano",l:"☀️ Verano"},{v:"Invierno",l:"❄️ Invierno"},{v:"Todas las estaciones",l:"🌤️ Todas las estaciones"},{v:"Run-flat",l:"🔵 Run-flat"}]}/>
+          <Field label="Medida ruedas verano" value={v.tyreSummer} onChange={val=>upd("tyreSummer",val)} placeholder="Ej: 205/55 R16"/>
+          <Field label="Medida ruedas invierno" value={v.tyreWinter} onChange={val=>upd("tyreWinter",val)} placeholder="Ej: 195/60 R16"/>
+        </div>}
+        {sec==="itv"&&<div style={{background:C.card,borderRadius:14,padding:16,border:`1px solid ${C.border}`}}>
+          <Field label="Fecha de caducidad" type="date" value={v.itv?.expiry} onChange={val=>upd("itv.expiry",val)}/>
+          <Field label="Aviso (días antes)" type="number" value={v.itv?.notifyDays} onChange={val=>upd("itv.notifyDays",val)} placeholder="30"/>
+          <Sel label="Resultado" value={v.itv?.result} onChange={val=>upd("itv.result",val)} opts={[{v:"",l:"—"},{v:"Favorable",l:"✅ Favorable"},{v:"Favorable con defectos leves",l:"⚠️ Con defectos leves"},{v:"Desfavorable",l:"❌ Desfavorable"},{v:"Negativa",l:"🚫 Negativa"}]}/>
+          <Field label="Precio (€)" type="number" value={v.itv?.price} onChange={val=>upd("itv.price",val)} placeholder="0.00"/>
+          <Field label="Nombre estación ITV" value={v.itv?.station} onChange={val=>upd("itv.station",val)} placeholder="Ej: ITV Parla Sur"/>
+          <Field label="Dirección (para mapa)" value={v.itv?.stationAddress} onChange={val=>upd("itv.stationAddress",val)} placeholder="Ej: Calle Industria 5, Parla"/>
+        </div>}
+        {sec==="seguro"&&<div style={{background:C.card,borderRadius:14,padding:16,border:`1px solid ${C.border}`}}>
+          <Field label="Compañía aseguradora" value={v.insurance?.company} onChange={val=>upd("insurance.company",val)} placeholder="Ej: Mapfre"/>
+          <Sel label="Tipo de seguro" value={v.insurance?.type} onChange={val=>upd("insurance.type",val)} opts={[{v:"Todo riesgo",l:"Todo riesgo"},{v:"Todo riesgo con franquicia",l:"Todo riesgo con franquicia"},{v:"Terceros ampliado",l:"Terceros ampliado"},{v:"Terceros básico",l:"Terceros básico"}]}/>
+          <Field label="Fecha caducidad" type="date" value={v.insurance?.expiry} onChange={val=>upd("insurance.expiry",val)}/>
+          <Field label="Aviso (días antes)" type="number" value={v.insurance?.notifyDays} onChange={val=>upd("insurance.notifyDays",val)} placeholder="30"/>
+          <Field label="Prima anual (€)" type="number" value={v.insurance?.price} onChange={val=>upd("insurance.price",val)} placeholder="0.00"/>
+          <Field label="Nº de póliza" value={v.insurance?.policyNum} onChange={val=>upd("insurance.policyNum",val)} placeholder="Ej: POL-12345"/>
+          <Field label="Teléfono compañía" value={v.insurance?.phone} onChange={val=>upd("insurance.phone",val)} placeholder="900 000 000"/>
+          <Field label="Promociones / descuentos" value={v.insurance?.promotions} onChange={val=>upd("insurance.promotions",val)} placeholder="Ej: 15% al renovar"/>
+          <Field label="Notas" value={v.insurance?.notes} onChange={val=>upd("insurance.notes",val)} placeholder="Coberturas..."/>
+          <Div m="14px 0"/>
+          <div style={{fontSize:10,color:C.purple,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:10}}>📱 App aseguradora</div>
+          <Field label="Nombre de la app" value={v.insurance?.appName} onChange={val=>upd("insurance.appName",val)} placeholder="Ej: Mapfre App"/>
+          <Field label="URL o enlace" value={v.insurance?.appUrl} onChange={val=>upd("insurance.appUrl",val)} placeholder="https://..."/>
+          <Field label="Usuario / email" value={v.insurance?.appUser} onChange={val=>upd("insurance.appUser",val)} placeholder="tu@email.com"/>
+          <Field label="Contraseña" value={v.insurance?.appPass} onChange={val=>upd("insurance.appPass",val)} placeholder="Contraseña..." pw/>
+        </div>}
+        {sec==="ficha"&&<div style={{background:C.card,borderRadius:14,padding:16,border:`1px solid ${C.border}`}}>
+          <div style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px",marginBottom:16,fontSize:11,color:C.dim}}>📄 Datos de la ficha técnica oficial.</div>
+          <Field label="Matrícula" value={v.ficha?.matricula} onChange={val=>upd("ficha.matricula",val)} placeholder="Ej: 9703 JZY"/>
+          <Field label="VIN — E" value={v.ficha?.vin} onChange={val=>upd("ficha.vin",val)} placeholder="VF1RFC00857975771"/>
+          <Field label="Marca — D.1" value={v.ficha?.marca} onChange={val=>upd("ficha.marca",val)} placeholder="RENAULT"/>
+          <Field label="Denominación — D.3" value={v.ficha?.denominacion} onChange={val=>upd("ficha.denominacion",val)} placeholder="ESPACE"/>
+          <Field label="Combustible — P.3" value={v.ficha?.combustible} onChange={val=>upd("ficha.combustible",val)} placeholder="GASOIL — M/D"/>
+          <Field label="Potencia — P.2" value={v.ficha?.potencia} onChange={val=>upd("ficha.potencia",val)} placeholder="96 kW"/>
+          <Field label="CV fiscales" value={v.ficha?.cvFiscales} onChange={val=>upd("ficha.cvFiscales",val)} placeholder="66"/>
+          <Field label="Masa vacío — G" value={v.ficha?.masaVacio} onChange={val=>upd("ficha.masaVacio",val)} placeholder="1.735 kg"/>
+          <Field label="Plazas — S.1" value={v.ficha?.plazas} onChange={val=>upd("ficha.plazas",val)} placeholder="7"/>
+          <Field label="Notas" value={v.ficha?.notas} onChange={val=>upd("ficha.notas",val)} placeholder="Observaciones..."/>
+        </div>}
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════
+// EXPORTAR
+// ════════════════════════════════════════════
+function ExportModal({data,onClose}){
+  const json=JSON.stringify(data,null,2);
+  const dl=()=>{const blob=new Blob([json],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`garaje_${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(url);};
+  return(
+    <div style={{position:"fixed",inset:0,background:"#000000cc",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div style={{background:C.card,borderRadius:"20px 20px 0 0",padding:24,width:"100%",maxWidth:480,border:`1px solid ${C.border}`}}>
+        <div style={{fontSize:16,fontWeight:800,marginBottom:4}}>☁️ Exportar a Google Drive</div>
+        <div style={{fontSize:12,color:C.dim,marginBottom:16}}>{data.vehicles.length} vehículos · {(new Blob([json]).size/1024).toFixed(1)} KB</div>
+        <button onClick={dl} style={{...primaryBtn(C.gold,"#080c18"),width:"100%",marginBottom:12}}>⬇️ Descargar JSON</button>
+        <div style={{background:C.bg,borderRadius:12,padding:12,marginBottom:12,fontSize:12,color:C.dim}}>
+          <strong style={{color:C.gold}}>Cómo subir a Google Drive:</strong><br/>
+          1. Descarga el archivo JSON<br/>
+          2. Abre Google Drive → Nuevo → Subir archivo<br/>
+          3. Selecciona el JSON descargado ✓
+        </div>
+        <button onClick={onClose} style={{...ghostBtn(C.dim),width:"100%",justifyContent:"center"}}>Cerrar</button>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════
+// APP PRINCIPAL
+// ════════════════════════════════════════════
+function App(){
+  const[data,setData]=useState(null);
+  const[screen,setScreen]=useState("home");
+  const[carIdx,setCarIdx]=useState(0);
+  const[secId,setSecId]=useState(null);
+  const[showExp,setShowExp]=useState(false);
+
+  useEffect(()=>{setData(loadData());},[]);
+
+  const persist=d=>{setData(d);saveData(d);};
+  const updateVehicle=updated=>{const vs=data.vehicles.map(v=>v.id===updated.id?updated:v);persist({...data,vehicles:vs});};
+
+  if(!data) return <div style={{background:C.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:C.dim}}>Cargando...</div>;
+
+  const curV=data.vehicles[carIdx];
+
+  return(
+    <div style={{background:C.bg,minHeight:"100vh",maxWidth:480,margin:"0 auto",fontFamily:"'Inter',-apple-system,sans-serif",color:C.text}}>
+      {screen==="home"&&<HomeScreen data={data} onSelectVehicle={i=>{setCarIdx(i);setScreen("vehicle");}} onExport={()=>setShowExp(true)}/>}
+      {screen==="vehicle"&&curV&&<VehicleScreen vehicle={curV} onBack={()=>setScreen("home")} onSection={id=>{setSecId(id);setScreen("section");}} onUpdate={updateVehicle} onEdit={()=>setScreen("edit")}/>}
+      {screen==="section"&&curV&&secId==="scan"&&<ScannerView vehicle={curV} onBack={()=>setScreen("vehicle")} onUpdate={v=>{updateVehicle(v);setScreen("vehicle");}}/>}
+      {screen==="section"&&curV&&secId==="ficha"&&<FichaView vehicle={curV} onBack={()=>setScreen("vehicle")}/>}
+      {screen==="section"&&curV&&secId==="itv"&&<ITVView vehicle={curV} onBack={()=>setScreen("vehicle")} onUpdate={updateVehicle}/>}
+      {screen==="section"&&curV&&secId==="insurance"&&<InsuranceView vehicle={curV} onBack={()=>setScreen("vehicle")} onUpdate={updateVehicle}/>}
+      {screen==="section"&&curV&&secId==="ivtm"&&<IVTMView vehicle={curV} onBack={()=>setScreen("vehicle")} onUpdate={updateVehicle}/>}
+      {screen==="section"&&curV&&secId==="revisions"&&<RevisionsView vehicle={curV} onBack={()=>setScreen("vehicle")} onUpdate={updateVehicle}/>}
+      {screen==="section"&&curV&&secId==="breakdowns"&&<BreakdownsView vehicle={curV} onBack={()=>setScreen("vehicle")} onUpdate={updateVehicle}/>}
+      {screen==="section"&&curV&&secId==="claims"&&<ClaimsView vehicle={curV} onBack={()=>setScreen("vehicle")} onUpdate={updateVehicle}/>}
+      {screen==="section"&&curV&&secId==="fuel"&&<FuelView vehicle={curV} onBack={()=>setScreen("vehicle")} onUpdate={updateVehicle}/>}
+      {screen==="edit"&&curV&&<VehicleEditForm vehicle={curV} onSave={v=>{updateVehicle(v);setScreen("vehicle");}} onCancel={()=>setScreen("vehicle")}/>}
+      {showExp&&<ExportModal data={data} onClose={()=>setShowExp(false)}/>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
