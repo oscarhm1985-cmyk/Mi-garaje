@@ -1576,6 +1576,183 @@ function ExportModal({data,onClose}){
   );
 }
 
+
+// ── IMPORTAR DESDE CLAUDE ──
+function ImportarClaude({vehicle,onUpdate,onClose}){
+  const[texto,setTexto]=useState("");
+  const[resultado,setResultado]=useState(null);
+  const[error,setError]=useState("");
+  const parsear=()=>{
+    setError("");setResultado(null);
+    try{
+      const datos={};let tipo="";
+      texto.trim().split("\n").forEach(l=>{
+        const l2=l.trim();
+        if(l2.startsWith("GARAJE:")){tipo=l2.replace("GARAJE:","").split("|")[0].trim();return;}
+        const idx=l2.indexOf(":");if(idx<0)return;
+        datos[l2.slice(0,idx).trim()]=l2.slice(idx+1).trim();
+      });
+      if(!tipo)throw new Error("No tipo");
+      setResultado({tipo,datos});
+    }catch(e){setError("Formato no reconocido. Pega el texto exacto que te dio Claude.");}
+  };
+  const guardar=()=>{
+    if(!resultado)return;
+    const{tipo,datos}=resultado;const id=Date.now().toString();
+    const updated=JSON.parse(JSON.stringify(vehicle));
+    if(tipo==="averia"){updated.breakdowns=[{id,description:datos.descripcion||"",workshop:datos.taller||"",workshopAddress:datos.direccion||"",date:datos.fecha||"",price:datos.importe||"",notes:datos.notas||"",bills:[]},...(updated.breakdowns||[])];}
+    else if(tipo==="revision"){updated.revisions=[{id,name:datos.descripcion||"Revisión",date:datos.fecha||"",km:datos.km||"",price:datos.importe||"",workshop:datos.taller||"",notes:datos.notas||"",bills:[]},...(updated.revisions||[])];}
+    else if(tipo==="itv"){updated.itvHistory=[{expiry:datos.caducidad||"",passDate:datos.fecha||"",result:datos.resultado||"",price:datos.importe||"",station:datos.taller||"",archivedAt:datos.fecha||new Date().toISOString().slice(0,10)},...(updated.itvHistory||[])];if(datos.caducidad)updated.itv={...updated.itv,expiry:datos.caducidad,passDate:datos.fecha||""};}
+    else if(tipo==="multa"){updated.fines=[{id,date:datos.fecha||"",amount:datos.importe||"",reason:datos.descripcion||"",points:datos.puntos||"",status:datos.estado||"Pendiente",authority:datos.organismo||"",reference:datos.referencia||"",payDeadline:datos.plazo||"",notes:datos.notas||""},...(updated.fines||[])];}
+    else if(tipo==="combustible"){updated.fuelLogs=[{id,date:datos.fecha||"",liters:datos.litros||"",pricePerL:datos.precio_litro||"",total:datos.importe||"",station:datos.taller||"",notes:datos.notas||""},...(updated.fuelLogs||[])];}
+    onUpdate(updated);onClose();
+  };
+  return(
+    <div style={{position:"fixed",inset:0,background:"#000000cc",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div style={{background:C.card,borderRadius:"20px 20px 0 0",padding:20,width:"100%",maxWidth:480,maxHeight:"80vh",overflowY:"auto"}}>
+        <div style={{fontSize:16,fontWeight:800,marginBottom:4}}>📋 Importar datos de Claude</div>
+        <div style={{fontSize:12,color:C.dim,marginBottom:12}}>Manda la foto del documento en este chat y pega aquí el texto que te dé Claude</div>
+        <div style={{background:C.blue+"11",border:"1px solid "+C.blue+"33",borderRadius:12,padding:12,marginBottom:12,fontSize:11,color:C.dim}}>
+          <strong style={{color:C.blue}}>Ejemplo de formato:</strong><br/>
+          GARAJE:averia<br/>
+          fecha:2024-03-15<br/>
+          taller:Renault Parla<br/>
+          importe:320<br/>
+          descripcion:Cambio embrague
+        </div>
+        <textarea value={texto} onChange={e=>setTexto(e.target.value)} placeholder="Pega aquí el texto de Claude..."
+          style={{width:"100%",background:C.input,border:"1px solid "+C.border,borderRadius:9,padding:"10px 13px",color:C.text,fontSize:12,outline:"none",boxSizing:"border-box",resize:"vertical",minHeight:120,fontFamily:"monospace"}}/>
+        {error&&<div style={{background:"#c0392b22",borderRadius:8,padding:"8px 12px",marginTop:8,fontSize:11,color:C.danger}}>{error}</div>}
+        {resultado&&(
+          <div style={{background:C.ok+"11",borderRadius:12,padding:12,marginTop:10}}>
+            <div style={{fontSize:12,fontWeight:700,color:C.ok,marginBottom:6}}>Tipo: {resultado.tipo}</div>
+            {Object.entries(resultado.datos).map(([k,v])=>(
+              <div key={k} style={{fontSize:11,color:C.dim,marginBottom:2}}><strong style={{color:C.text}}>{k}:</strong> {v}</div>
+            ))}
+          </div>
+        )}
+        <div style={{display:"flex",gap:10,marginTop:14}}>
+          <button onClick={onClose} style={{...ghostBtn(C.dim),flex:1,justifyContent:"center"}}>Cancelar</button>
+          {!resultado
+            ?<button onClick={parsear} style={{...primaryBtn(C.blue),flex:2}}>🔍 Analizar</button>
+            :<button onClick={guardar} style={{...primaryBtn(C.ok),flex:2}}>💾 Guardar</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── GASTOS TOTALES ──
+function GastosTotalesView({vehicle,onBack}){
+  const t=calcTotals(vehicle);
+  const purchasePrice=parseFloat(vehicle.purchasePrice||0);
+  const items=[
+    {label:"💜 Seguro",val:t.seguro,col:C.purple},{label:"🔧 ITV",val:t.itv,col:C.blue},
+    {label:"🏛️ IVTM",val:t.ivtm,col:"#c0392b"},{label:"⚙️ Revisiones",val:t.revisiones,col:C.teal},
+    {label:"🔩 Averías",val:t.averias,col:C.danger},{label:"📋 Partes",val:t.partes,col:C.pink},
+    {label:"🚨 Multas",val:t.multas,col:C.orange},{label:"⛽ Combustible",val:t.combustible,col:"#16a085"},
+  ].filter(i=>i.val>0);
+  return(
+    <SectionLayout title="Gastos totales" emoji="💰" col={C.gold} onBack={onBack}>
+      {purchasePrice>0&&(
+        <div style={{...heroCard(C.gold),marginBottom:12}}>
+          <div style={{fontSize:11,color:C.gold,fontWeight:700,textTransform:"uppercase",marginBottom:4}}>Precio de compra</div>
+          <div style={{fontSize:28,fontWeight:900,color:C.text}}>{fmt.eur(purchasePrice)}</div>
+          {vehicle.purchaseDate&&<div style={{fontSize:12,color:C.dim,marginTop:2}}>Fecha: {fmt.date(vehicle.purchaseDate)}</div>}
+        </div>
+      )}
+      <div style={{background:"linear-gradient(135deg,"+C.gold+"22,"+C.card+")",border:"1px solid "+C.gold+"44",borderRadius:16,padding:16,marginBottom:12}}>
+        <div style={{fontSize:11,color:C.gold,fontWeight:700,textTransform:"uppercase",marginBottom:4}}>Total gastos</div>
+        <div style={{fontSize:34,fontWeight:900,color:C.text}}>{fmt.eur(t.total)}</div>
+        {purchasePrice>0&&<div style={{fontSize:13,color:C.dim,marginTop:4}}>Con compra: <strong style={{color:C.gold}}>{fmt.eur(t.total+purchasePrice)}</strong></div>}
+      </div>
+      {items.map(item=>(
+        <div key={item.label} style={{background:C.card,borderRadius:14,padding:"12px 16px",marginBottom:8,border:"1px solid "+item.col+"22",borderLeft:"4px solid "+item.col}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{fontSize:14,fontWeight:700}}>{item.label}</div>
+            <div style={{fontSize:20,fontWeight:900,color:item.col}}>{fmt.eur(item.val)}</div>
+          </div>
+          <div style={{height:4,background:C.dim2,borderRadius:4,marginTop:8}}>
+            <div style={{height:4,background:item.col,borderRadius:4,width:Math.min(100,(item.val/t.total)*100)+"%"}}/>
+          </div>
+          <div style={{fontSize:10,color:C.dim,marginTop:4,textAlign:"right"}}>{Math.round((item.val/t.total)*100)}%</div>
+        </div>
+      ))}
+      {items.length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:C.dim}}><div style={{fontSize:40,marginBottom:10}}>💰</div><div>Sin gastos registrados aún</div></div>}
+    </SectionLayout>
+  );
+}
+
+// ── MULTAS ──
+function FinesView({vehicle,onBack,onUpdate}){
+  const fines=sortByDate(vehicle.fines||[],"date");
+  const[adding,setAdding]=useState(false);
+  const blank={id:"",date:"",amount:"",reason:"",points:"",status:"Pendiente",authority:"",reference:"",payDeadline:"",notes:""};
+  const[form,setForm]=useState(blank);
+  const totalGasto=fines.reduce((s,f)=>s+(parseFloat(f.amount)||0),0);
+  const pendCount=fines.filter(f=>f.status==="Pendiente").length;
+  const totalPuntos=fines.reduce((s,f)=>s+(parseInt(f.points)||0),0);
+  const add=()=>{onUpdate({...vehicle,fines:[{...form,id:Date.now().toString()},...fines]});setForm(blank);setAdding(false);};
+  const del=id=>onUpdate({...vehicle,fines:fines.filter(f=>f.id!==id)});
+  const toggleStatus=id=>{const list=fines.map(f=>f.id===id?{...f,status:f.status==="Pendiente"?"Pagada":f.status==="Pagada"?"Recurrida":"Pendiente"}:f);onUpdate({...vehicle,fines:list});};
+  return(
+    <SectionLayout title="Multas" emoji="🚨" col={C.orange} onBack={onBack}>
+      {fines.length>0&&(
+        <div style={{background:C.card,borderRadius:14,padding:"12px 16px",marginBottom:12,border:"1px solid "+C.border,display:"flex",gap:12}}>
+          <div style={{flex:1,textAlign:"center"}}><div style={{fontSize:10,color:C.dim,marginBottom:2}}>Pendientes</div><div style={{fontSize:20,fontWeight:900,color:pendCount>0?C.danger:C.ok}}>{pendCount}</div></div>
+          <div style={{width:1,background:C.border}}/>
+          <div style={{flex:1,textAlign:"center"}}><div style={{fontSize:10,color:C.dim,marginBottom:2}}>Total</div><div style={{fontSize:16,fontWeight:900,color:C.orange}}>{fmt.eur(totalGasto)}</div></div>
+          <div style={{width:1,background:C.border}}/>
+          <div style={{flex:1,textAlign:"center"}}><div style={{fontSize:10,color:C.dim,marginBottom:2}}>Puntos</div><div style={{fontSize:20,fontWeight:900,color:totalPuntos>0?C.danger:C.ok}}>-{totalPuntos}</div></div>
+        </div>
+      )}
+      {fines.length===0&&!adding&&<div style={{textAlign:"center",padding:"40px 20px",color:C.dim}}><div style={{fontSize:36,marginBottom:8}}>🚨</div><div>Sin multas registradas</div></div>}
+      {fines.map(f=>{
+        const col=f.status==="Pendiente"?C.danger:f.status==="Recurrida"?C.warn:C.ok;
+        return(
+          <div key={f.id} style={{background:C.card,borderRadius:14,padding:14,marginBottom:10,border:"1px solid "+C.border,borderLeft:"3px solid "+col}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+              <div style={{flex:1}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                  <div style={{fontSize:14,fontWeight:800}}>{f.reason||"Sin descripción"}</div>
+                  <button onClick={()=>toggleStatus(f.id)} style={{...ghostBtn(col),padding:"1px 7px",fontSize:9}}>{f.status}</button>
+                </div>
+                <div style={{fontSize:11,color:C.dim}}>{fmt.date(f.date)}{f.authority?" · "+f.authority:""}</div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                <Pill c={C.orange}>{fmt.eur(f.amount)}</Pill>
+                {f.points&&parseInt(f.points)>0&&<Pill c={C.danger}>-{f.points}pts</Pill>}
+                <button onClick={()=>del(f.id)} style={ghostBtn(C.danger)}>✕</button>
+              </div>
+            </div>
+            {f.reference&&<div style={{fontSize:11,color:C.dim,marginBottom:4}}>Ref: <span style={{color:C.text}}>{f.reference}</span></div>}
+            {f.payDeadline&&<div style={{fontSize:11,color:daysDiff(f.payDeadline)<0?C.danger:C.dim,marginBottom:4}}>⏰ Plazo: {fmt.date(f.payDeadline)}</div>}
+            {f.notes&&<div style={{fontSize:11,color:C.dim}}>{f.notes}</div>}
+          </div>
+        );
+      })}
+      {adding?(
+        <div style={{background:C.card,borderRadius:14,padding:14,border:"1px dashed "+C.border}}>
+          <Field label="Infracción" value={form.reason} onChange={v=>setForm(p=>({...p,reason:v}))} placeholder="Ej: Exceso de velocidad"/>
+          <Field label="Fecha" type="date" value={form.date} onChange={v=>setForm(p=>({...p,date:v}))}/>
+          <Field label="Importe (€)" type="number" value={form.amount} onChange={v=>setForm(p=>({...p,amount:v}))} placeholder="0.00"/>
+          <Field label="Puntos retirados" type="number" value={form.points} onChange={v=>setForm(p=>({...p,points:v}))} placeholder="0"/>
+          <Sel label="Estado" value={form.status} onChange={v=>setForm(p=>({...p,status:v}))} opts={[{v:"Pendiente",l:"🔴 Pendiente"},{v:"Pagada",l:"✅ Pagada"},{v:"Recurrida",l:"⚖️ Recurrida"},{v:"Anulada",l:"🟢 Anulada"}]}/>
+          <Field label="Organismo" value={form.authority} onChange={v=>setForm(p=>({...p,authority:v}))} placeholder="DGT, Ayuntamiento..."/>
+          <Field label="Nº expediente" value={form.reference} onChange={v=>setForm(p=>({...p,reference:v}))} placeholder="M-2024-12345"/>
+          <Field label="Plazo de pago" type="date" value={form.payDeadline} onChange={v=>setForm(p=>({...p,payDeadline:v}))}/>
+          <Field label="Notas" value={form.notes} onChange={v=>setForm(p=>({...p,notes:v}))} placeholder="Descuento pronto pago..."/>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>setAdding(false)} style={ghostBtn(C.dim)}>Cancelar</button>
+            <button onClick={add} style={{...primaryBtn(C.orange),flex:1}}>Añadir multa</button>
+          </div>
+        </div>
+      ):<button onClick={()=>setAdding(true)} style={{...ghostBtn(C.orange),width:"100%",justifyContent:"center",marginBottom:8}}>+ Añadir multa</button>}
+      <SectionDocs vehicle={vehicle} sectionKey="fines" onUpdate={onUpdate} accent={C.orange} docTypes={["Notificación","Justificante de pago","Recurso","Resolución","Otro"]}/>
+    </SectionLayout>
+  );
+}
+
 // ════════════════════════════════════════════
 // APP PRINCIPAL
 // ════════════════════════════════════════════
@@ -1619,7 +1796,6 @@ function App(){
     <div style={{background:C.bg,minHeight:"100vh",maxWidth:480,margin:"0 auto",fontFamily:"'Inter',-apple-system,sans-serif",color:C.text}}>
       {screen==="home"&&<HomeScreen data={data} onSelectVehicle={i=>{setCarIdx(i);setScreen("vehicle");}} onExport={()=>setShowExp(true)}/>}
       {screen==="vehicle"&&curV&&<VehicleScreen vehicle={curV} onBack={()=>setScreen("home")} onSection={id=>{setSecId(id);setScreen("section");}} onUpdate={updateVehicle} onEdit={()=>setScreen("edit")}/>}
-}
       {screen==="section"&&curV&&secId==="ficha"&&<FichaView vehicle={curV} onBack={()=>setScreen("vehicle")}/>}
       {screen==="section"&&curV&&secId==="itv"&&<ITVView vehicle={curV} onBack={()=>setScreen("vehicle")} onUpdate={updateVehicle}/>}
       {screen==="section"&&curV&&secId==="insurance"&&<InsuranceView vehicle={curV} onBack={()=>setScreen("vehicle")} onUpdate={updateVehicle}/>}
@@ -1628,8 +1804,6 @@ function App(){
       {screen==="section"&&curV&&secId==="breakdowns"&&<BreakdownsView vehicle={curV} onBack={()=>setScreen("vehicle")} onUpdate={updateVehicle}/>}
       {screen==="section"&&curV&&secId==="claims"&&<ClaimsView vehicle={curV} onBack={()=>setScreen("vehicle")} onUpdate={updateVehicle}/>}
       {screen==="section"&&curV&&secId==="fuel"&&<FuelView vehicle={curV} onBack={()=>setScreen("vehicle")} onUpdate={updateVehicle}/>}
-      {screen==="section"&&curV&&secId==="fines"&&<FinesView vehicle={curV} onBack={()=>setScreen("vehicle")} onUpdate={updateVehicle}/>}
-      {screen==="section"&&curV&&secId==="gastos"&&<GastosTotalesView vehicle={curV} onBack={()=>setScreen("vehicle")}/>}
       {screen==="section"&&curV&&secId==="fines"&&<FinesView vehicle={curV} onBack={()=>setScreen("vehicle")} onUpdate={updateVehicle}/>}
       {screen==="section"&&curV&&secId==="gastos"&&<GastosTotalesView vehicle={curV} onBack={()=>setScreen("vehicle")}/>}
       {screen==="edit"&&curV&&<VehicleEditForm vehicle={curV} onSave={v=>{updateVehicle(v);setScreen("vehicle");}} onCancel={()=>setScreen("vehicle")}/>}
